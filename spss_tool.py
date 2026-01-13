@@ -3,159 +3,112 @@ import pandas as pd
 import pyreadstat
 import io
 import os
-import datetime
 
-# --- CONFIGURACIÓN DE INTERFAZ ESTILO SPSS ---
-st.set_page_config(page_title="SPSS Cloud Manager Pro", layout="wide", page_icon="📊")
-
-def generate_spss_syntax(df, meta):
-    """Genera un archivo de sintaxis .sps básico para reconstruir etiquetas."""
-    syntax = ["* Sintaxis generada por SPSS Web Manager Pro.\n"]
-    
-    # Variable Labels
-    syntax.append("VARIABLE LABELS")
-    for var, label in meta.column_names_to_labels.items():
-        if var in df.columns:
-            syntax.append(f"  {var} '{label}'")
-    syntax.append(".\n")
-    
-    # Value Labels
-    if meta.variable_value_labels:
-        syntax.append("VALUE LABELS")
-        for var, labels in meta.variable_value_labels.items():
-            if var in df.columns:
-                syntax.append(f"  / {var}")
-                for val, lab in labels.items():
-                    val_str = f"'{val}'" if isinstance(val, str) else str(val)
-                    syntax.append(f"    {val_str} '{lab}'")
-        syntax.append(".\n")
-    
-    syntax.append("EXECUTE.")
-    return "\n".join(syntax)
+# --- CONFIGURACIÓN DE INTERFAZ ---
+st.set_page_config(page_title="SPSS Ultimate Web Manager", layout="wide", page_icon="⚙️")
 
 def main():
-    # --- ESTILOS CSS PARA ANDROID/WEB ---
-    st.markdown("""
-        <style>
-        .stTabs [data-baseweb="tab-list"] { gap: 10px; }
-        .stTabs [data-baseweb="tab"] {
-            background-color: #f0f2f6; border-radius: 4px 4px 0px 0px; padding: 10px;
-        }
-        .stTabs [aria-selected="true"] { background-color: #007bff !important; color: white !important; }
-        </style>
-    """, unsafe_allow_html=True)
+    st.title("📊 SPSS Ultimate Web Manager")
+    st.markdown("Gestión integral: Exportación, Limpieza, Planchado y Sintaxis.")
 
-    st.title("📊 SPSS Web Manager Pro")
-    st.info("Herramienta para procesar exportaciones de LimeSurvey y revisiones de clientes.")
+    # 1. CARGA INICIAL (SAV DE LIMESURVEY)
+    uploaded_sav = st.sidebar.file_uploader("1. Subir SAV (Metadatos Base)", type=["sav"])
 
-    # --- BARRA LATERAL: CARGA DE ARCHIVOS ---
-    with st.sidebar:
-        st.header("1. Carga de Archivos")
-        uploaded_sav = st.file_uploader("Subir SAV Original (Metadatos)", type=["sav"])
-        uploaded_excel = st.file_uploader("Subir Excel Revisado (Datos)", type=["xlsx"])
+    if uploaded_sav:
+        # Guardar y leer metadatos
+        with open("base.sav", "wb") as f:
+            f.write(uploaded_sav.getbuffer())
+        df_orig, meta = pyreadstat.read_sav("base.sav")
         
-        st.divider()
-        if st.button("🗑️ Borrar Todo y Reiniciar"):
-            for key in st.session_state.keys():
-                del st.session_state[key]
-            st.rerun()
+        # Guardar metadatos en session_state para persistencia
+        if 'meta' not in st.session_state:
+            st.session_state.meta = meta
 
-    if not uploaded_sav:
-        st.warning("👈 Por favor, carga el archivo .sav original para empezar.")
-        return
+        # --- PESTAÑAS DEL FLUJO DE TRABAJO ---
+        t1, t2, t3, t4 = st.tabs([
+            "📥 1. Exportar para Cliente", 
+            "✂️ 2. Borrar Columnas", 
+            "🔥 3. Planchar y Editar", 
+            "📜 4. Sintaxis y Finalizar"
+        ])
 
-    # --- PROCESAMIENTO DE ARCHIVOS ---
-    # Leer SAV original para extraer el "ADN" (etiquetas, tipos, etc.)
-    with open("temp_orig.sav", "wb") as f:
-        f.write(uploaded_sav.getbuffer())
-    df_sav, meta = pyreadstat.read_sav("temp_orig.sav")
-    
-    # Cargar datos desde Excel o desde el SAV si no hay Excel aún
-    if uploaded_excel:
-        df_final = pd.read_excel(uploaded_excel)
-        st.success("✅ Datos del Excel del cliente cargados.")
+        # TAB 1: EXPORTAR EXCEL CRUDO
+        with t1:
+            st.subheader("Generar Excel para revisión")
+            st.write("Este archivo contiene los datos originales y el diccionario de códigos.")
+            
+            output_rev = io.BytesIO()
+            with pd.ExcelWriter(output_rev, engine='openpyxl') as writer:
+                df_orig.to_excel(writer, sheet_name='Datos_Crudos', index=False)
+                # Hoja de códigos
+                dicc = []
+                for var, labels in meta.variable_value_labels.items():
+                    for val, lab in labels.items():
+                        dicc.append({"Variable": var, "Código": val, "Etiqueta": lab})
+                pd.DataFrame(dicc).to_excel(writer, sheet_name='Diccionario', index=False)
+            
+            st.download_button("📥 Descargar Excel Crudo", output_rev.getvalue(), 
+                               file_name="Revision_Cliente.xlsx", mime="application/vnd.ms-excel")
+
+        # TAB 2: BORRAR COLUMNAS
+        with t2:
+            st.subheader("Limpieza de Variables")
+            cols_to_keep = st.multiselect("Selecciona las columnas que deseas MANTENER:", 
+                                         options=df_orig.columns, default=list(df_orig.columns))
+            df_cleaned = df_orig[cols_to_keep]
+            st.warning(f"Columnas eliminadas: {len(df_orig.columns) - len(cols_to_keep)}")
+
+        # TAB 3: PLANCHAR Y EDITAR DATOS
+        with t3:
+            st.subheader("Planchado de datos revisados")
+            file_revisado = st.file_uploader("Subir Excel con cambios del cliente", type=["xlsx"])
+            
+            if file_revisado:
+                df_planchado = pd.read_excel(file_revisado)
+                # Sincronizar con las columnas elegidas en el paso anterior
+                df_final_edit = df_planchado[[c for c in cols_to_keep if c in df_planchado.columns]]
+                st.success("✅ Datos del cliente cargados sobre la estructura seleccionada.")
+            else:
+                df_final_edit = df_cleaned
+                st.info("Editando datos actuales (o sube un Excel arriba para planchar).")
+
+            # Editor interactivo (Permite modificar datos puntuales)
+            df_final_edit = st.data_editor(df_final_edit, use_container_width=True, height=400)
+
+        # TAB 4: SINTAXIS Y EXPORTACIÓN FINAL
+        with t4:
+            st.subheader("Generación de Sintaxis y SAV")
+            
+            # Generar sintaxis base
+            syntax_text = "* Sintaxis generada por Web Manager.\n"
+            syntax_text += "VARIABLE LABELS\n"
+            for var in df_final_edit.columns:
+                label = meta.column_names_to_labels.get(var, var)
+                syntax_text += f"  {var} '{label}'\n"
+            syntax_text += ".\nEXECUTE."
+
+            # Area de edición de sintaxis (puedes modificarla manualmente aquí)
+            custom_syntax = st.text_area("Puedes modificar la sintaxis aquí:", value=syntax_text, height=200)
+
+            col_a, col_b = st.columns(2)
+            with col_a:
+                # Botón Exportar SAV
+                if st.button("💾 Generar .SAV Final"):
+                    pyreadstat.write_sav(
+                        df_final_edit, "final.sav",
+                        column_labels={k: v for k, v in meta.column_names_to_labels.items() if k in df_final_edit.columns},
+                        variable_value_labels={k: v for k, v in meta.variable_value_labels.items() if k in df_final_edit.columns}
+                    )
+                    with open("final.sav", "rb") as f:
+                        st.download_button("📥 Descargar SAV", f, file_name="Estudio_Final.sav")
+            
+            with col_b:
+                # Botón Descargar Sintaxis Editada
+                st.download_button("📥 Descargar Sintaxis (.sps)", custom_syntax, file_name="Sintaxis_Final.sps")
+
     else:
-        df_final = df_sav.copy()
-        st.info("💡 Usando datos del SAV (aún no has subido el Excel revisado).")
-
-    # --- VALIDACIÓN DE COMPATIBILIDAD ---
-    missing_in_excel = [c for c in df_sav.columns if c not in df_final.columns]
-    if missing_in_excel and uploaded_excel:
-        st.error(f"⚠️ El Excel no contiene estas columnas necesarias: {', '.join(missing_in_excel)}")
-        if not st.checkbox("Continuar ignorando columnas faltantes"):
-            return
-
-    # --- PESTAÑAS PRINCIPALES (INTERFACE SPSS) ---
-    tab_data, tab_vars, tab_export = st.tabs(["📑 Vista de Datos", "🗂️ Vista de Variables", "📥 Exportar Entregables"])
-
-    with tab_data:
-        st.subheader("Data View")
-        # st.data_editor permite editar celdas como en SPSS
-        df_final = st.data_editor(df_final, use_container_width=True, height=500)
-
-    with tab_vars:
-        st.subheader("Variable View")
-        var_data = []
-        for col in df_final.columns:
-            var_data.append({
-                "Nombre": col,
-                "Etiqueta": meta.column_names_to_labels.get(col, "Sin etiqueta"),
-                "Tipo": "Numérica" if col in meta.variable_value_labels else "Cadena/Texto",
-                "Medida": meta.variable_measure.get(col, "unknown"),
-                "Valores": str(meta.variable_value_labels.get(col, ""))
-            })
-        st.table(pd.DataFrame(var_data))
-
-    with tab_export:
-        st.subheader("Generación de Archivos para el Cliente")
-        
-        col1, col2 = st.columns(2)
-        
-        with col1:
-            st.markdown("### 🛠️ Configuración")
-            file_name = st.text_input("Nombre del proyecto:", "Estudio_Revisado")
-            
-        with col2:
-            st.markdown("### 📦 Entregables")
-            
-            # 1. Generar SAV "Planchado"
-            try:
-                # Sincronizamos metadatos: solo los de las columnas presentes en df_final
-                clean_labels = {k: v for k, v in meta.column_names_to_labels.items() if k in df_final.columns}
-                clean_values = {k: v for k, v in meta.variable_value_labels.items() if k in df_final.columns}
-                
-                sav_buffer = io.BytesIO()
-                pyreadstat.write_sav(
-                    df_final, 
-                    "temp_output.sav", 
-                    column_labels=clean_labels,
-                    variable_value_labels=clean_values,
-                    variable_measure=meta.variable_measure
-                )
-                with open("temp_output.sav", "rb") as f:
-                    st.download_button("📥 Descargar .SAV (SPSS)", f, file_name=f"{file_name}.sav")
-            except Exception as e:
-                st.error(f"Error al generar SAV: {e}")
-
-            # 2. Libro de Códigos (Excel de códigos)
-            codebook_list = []
-            for var, labels in clean_values.items():
-                for code, label in labels.items():
-                    codebook_list.append({"Variable": var, "Código": code, "Etiqueta de Valor": label})
-            
-            df_codes = pd.DataFrame(codebook_list)
-            output_codes = io.BytesIO()
-            with pd.ExcelWriter(output_codes, engine='openpyxl') as writer:
-                df_codes.to_excel(writer, index=False)
-            st.download_button("📥 Descargar Libro de Códigos (Excel)", output_codes.getvalue(), file_name=f"{file_name}_codigos.xlsx")
-
-            # 3. Sintaxis .SPS
-            syntax_content = generate_spss_syntax(df_final, meta)
-            st.download_button("📥 Descargar Sintaxis (.SPS)", syntax_content, file_name=f"{file_name}.sps")
-
-    # Limpieza
-    if os.path.exists("temp_orig.sav"): os.remove("temp_orig.sav")
-    if os.path.exists("temp_output.sav"): os.remove("temp_output.sav")
+        st.info("👈 Sube un archivo .sav en el panel lateral para comenzar el flujo.")
 
 if __name__ == "__main__":
     main()
+    
