@@ -1,0 +1,14 @@
+[theme]
+primaryColor = "#007bff"
+backgroundColor = "#ffffff"
+secondaryBackgroundColor = "#f0f2f6"
+textColor = "#262730"
+font = "sans serif"
+
+[server]
+# Permite subir archivos de LimeSurvey de hasta 200MB
+maxUploadSize = 200
+
+[browser]
+# Hace que la interfaz se vea más limpia en Android
+toolbarMode = "minimal"
