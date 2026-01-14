@@ -37,41 +37,62 @@ def main():
         st.session_state.df_orig = df_orig
         st.session_state.meta = meta
         st.session_state.all_cols = list(df_orig.columns)
-        os.remove(input_path)
+        if os.path.exists(input_path): os.remove(input_path)
 
     # TABS DEL FLUJO LINEAL
-    t1, t2, t3 = st.tabs(["🌳 Paso 1: ADN & Estructura", "🔍 Paso 2: Validación de Planchado", "💾 Paso 3: Exportación Final"])
+    t1, t2, t3 = st.tabs(["🌳 Paso 1: ADN & Entrega Cliente", "🔍 Paso 2: Validación de Planchado", "💾 Paso 3: Exportación Final"])
 
     # --- TAB 1: DEFINICIÓN DE ESTRUCTURA Y ENTREGA AL CLIENTE ---
     with t1:
         st.subheader("Configuración de la Base para el Cliente")
         cols_to_keep = st.multiselect(
-            "Seleccione/Filtre las columnas para el cliente:", 
+            "Seleccione las columnas que enviará al cliente:", 
             options=st.session_state.all_cols, 
             default=st.session_state.all_cols
         )
         
         df_for_client = st.session_state.df_orig[cols_to_keep]
-        st.session_state.cols_active = cols_to_keep # Guardamos para el planchado
+        st.session_state.cols_active = cols_to_keep 
 
-        st.write(f"Variables activas: {len(cols_to_keep)}")
+        st.write(f"Variables seleccionadas: {len(cols_to_keep)}")
         
-        # Botón para descargar el SAV que el cliente debe llenar/corregir
-        st.info("💡 Descarga este SAV para entregárselo al cliente. El cliente debe devolver este archivo convertido en Excel.")
+        st.info("📢 **Descarga para el Cliente:** Entregue estos archivos. El Excel es el que deberá devolver editado.")
         
-        buf_base = io.BytesIO()
-        # Mantenemos metadatos originales solo de las columnas elegidas
-        f_labels = {k: v for k, v in st.session_state.meta.column_names_to_labels.items() if k in cols_to_keep}
-        f_values = {k: v for k, v in st.session_state.meta.variable_value_labels.items() if k in cols_to_keep}
+        col_down1, col_down2 = st.columns(2)
         
-        pyreadstat.write_sav(df_for_client, "base_cliente.sav", column_labels=f_labels, variable_value_labels=f_values)
-        with open("base_cliente.sav", "rb") as f:
-            st.download_button("📥 Descargar SAV para Cliente", f, "Estructura_Cliente.sav", use_container_width=True)
+        with col_down1:
+            # DESCARGA EXCEL (Lo que ellos realmente usan)
+            output_xlsx = io.BytesIO()
+            df_for_client.to_excel(output_xlsx, index=False)
+            st.download_button(
+                label="📥 Descargar EXCEL para Cliente",
+                data=output_xlsx.getvalue(),
+                file_name="Estructura_Para_Completar.xlsx",
+                mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+                use_container_width=True
+            )
+
+        with col_down2:
+            # DESCARGA SAV (Lo que ellos piden por protocolo)
+            f_labels = {k: v for k, v in st.session_state.meta.column_names_to_labels.items() if k in cols_to_keep}
+            f_values = {k: v for k, v in st.session_state.meta.variable_value_labels.items() if k in cols_to_keep}
+            
+            temp_sav = "base_cliente.sav"
+            pyreadstat.write_sav(df_for_client, temp_sav, column_labels=f_labels, variable_value_labels=f_values)
+            with open(temp_sav, "rb") as f:
+                st.download_button(
+                    label="📥 Descargar SPSS para Cliente",
+                    data=f,
+                    file_name="Estructura_Cliente.sav",
+                    mime="application/octet-stream",
+                    use_container_width=True
+                )
+            if os.path.exists(temp_sav): os.remove(temp_sav)
 
     # --- TAB 2: CICLO DE PLANCHADO Y RECHAZO ---
     with t2:
         st.subheader("Auditoría del Excel de Planchado")
-        excel_file = st.file_uploader("Subir el Excel que devolvió el cliente", type=["xlsx"])
+        excel_file = st.file_uploader("Subir el Excel que devolvió el cliente (editado)", type=["xlsx"])
         
         if excel_file:
             df_excel = pd.read_excel(excel_file)
@@ -87,64 +108,61 @@ def main():
 
             for col in df_excel.columns:
                 if col in st.session_state.cols_active:
-                    # ADN de la variable: ¿Es numérica en el SAV original?
                     is_numeric_dna = pd.api.types.is_numeric_dtype(st.session_state.df_orig[col])
                     
                     for idx, val in df_excel[col].items():
-                        # Error 1: Caracteres prohibidos (Naranja)
+                        # Error 1: Caracteres prohibidos
                         if detect_prohibited_chars(val):
-                            log_errores.append({"Fila": idx+2, "Columna": col, "Error": "Caracteres Prohibidos/Saltos de Línea", "Valor": val})
+                            log_errores.append({"Fila": idx+2, "Columna": col, "Error": "Caracteres Prohibidos (Saltos de línea)", "Valor": val})
                             style_map.at[idx, col] = 'background-color: #ff9800; color: white'
 
-                        # Error 2: Tipo de dato (Rojo)
+                        # Error 2: Tipo de dato (Se esperaba número)
                         if is_numeric_dna and pd.notnull(val):
                             try:
                                 float(val)
                             except:
-                                log_errores.append({"Fila": idx+2, "Columna": col, "Error": "Se esperaba NÚMERO y hay TEXTO", "Valor": val})
+                                log_errores.append({"Fila": idx+2, "Columna": col, "Error": "Dato NO numérico", "Valor": val})
                                 style_map.at[idx, col] = 'background-color: #f44336; color: white'
 
-            # Error 3: Teléfonos duplicados (Amarillo)
+            # Error 3: Teléfonos duplicados
             if sel_phone:
                 mask_dups = df_excel[sel_phone].duplicated(keep=False) & df_excel[sel_phone].notnull()
                 for idx in df_excel.index[mask_dups]:
-                    log_errores.append({"Fila": idx+2, "Columna": sel_phone, "Error": "Teléfono DUPLICADO", "Valor": df_excel.at[idx, sel_phone]})
+                    log_errores.append({"Fila": idx+2, "Columna": sel_phone, "Error": "Teléfono REPETIDO", "Valor": df_excel.at[idx, sel_phone]})
                     style_map.at[idx, sel_phone] = 'background-color: #ffff00; color: black'
 
             # --- GESTIÓN DE LA DEVOLUCIÓN ---
             if log_errores:
                 st.session_state.apto = False
                 df_log = pd.DataFrame(log_errores)
-                st.error(f"❌ ARCHIVO RECHAZADO: Se encontraron {len(log_errores)} incidencias.")
+                st.error(f"❌ ARCHIVO RECHAZADO: Se encontraron {len(log_errores)} errores.")
                 
-                # Crear Excel de Devolución
                 output_audit = io.BytesIO()
                 with pd.ExcelWriter(output_audit, engine='openpyxl') as writer:
-                    df_excel.style.apply(lambda x: style_map, axis=None).to_excel(writer, sheet_name='DATOS_A_CORREGIR', index=False)
+                    df_excel.style.apply(lambda x: style_map, axis=None).to_excel(writer, sheet_name='CORREGIR_AQUI', index=False)
                     df_log.to_excel(writer, sheet_name='INFORME_DE_ERRORES', index=False)
                 
                 st.download_button(
-                    label="📥 DESCARGAR INFORME DE ERRORES PARA EL CLIENTE",
+                    label="📥 DESCARGAR EXCEL CON ERRORES MARCADOS",
                     data=output_audit.getvalue(),
-                    file_name="RECHAZO_POR_CALIDAD.xlsx",
+                    file_name="DEVOLVER_AL_CLIENTE_CON_ERRORES.xlsx",
                     mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
                     use_container_width=True
                 )
                 st.dataframe(df_log, use_container_width=True)
             else:
-                st.success("✅ ARCHIVO VALIDADO: El Excel cumple con la sintaxis y reglas del ADN.")
+                st.success("✅ ARCHIVO VALIDADO: El Excel está perfecto para generar la base final.")
                 st.session_state.apto = True
                 st.session_state.df_final = df_excel
         else:
-            st.info("Esperando el Excel del cliente para iniciar el ciclo de validación.")
+            st.info("Suba el Excel editado por el cliente para validarlo.")
 
-    # --- TAB 3: EXPORTACIÓN FINAL (BLOQUEADA HASTA VALIDACIÓN) ---
+    # --- TAB 3: EXPORTACIÓN FINAL ---
     with t3:
         if st.session_state.get('apto', False):
-            st.subheader("💾 Exportación de Productos Finales")
-            final_name = st.text_input("Nombre del Proyecto:", value="Estudio_Final_Limpio")
+            st.subheader("💾 Exportación de Base Final")
+            final_name = st.text_input("Nombre del archivo:", value="Base_Limpia_Analisis")
             
-            # Exportar SAV con ADN inyectado
             output_sav = "final_clean.sav"
             pyreadstat.write_sav(
                 st.session_state.df_final, 
@@ -154,9 +172,14 @@ def main():
             )
             
             with open(output_sav, "rb") as f:
-                st.download_button("📥 Descargar SAV Final (Inteligente)", f, f"{final_name}.sav", use_container_width=True)
+                st.download_button("📥 Descargar SAV Final para Procesamiento", f, f"{final_name}.sav", use_container_width=True)
+            
+            if os.path.exists(output_sav): os.remove(output_sav)
         else:
-            st.warning("⚠️ Pestaña Bloqueada. Debe validar el Excel en el paso anterior y resolver todos los errores antes de exportar.")
+            st.warning("Debe validar el Excel en el Paso 2 para habilitar esta descarga.")
+
+if __name__ == "__main__":
+    main()
 
 if __name__ == "__main__":
     main()
