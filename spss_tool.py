@@ -5,226 +5,185 @@ import io
 import os
 import re
 
-# --- CONFIGURACIÓN DE UI PARA DISPOSITIVOS MÓVILES Y TABLETS ---
-st.set_page_config(
-    page_title="SPSS Master Validator",
-    layout="wide", # Aprovecha el ancho de la Galaxy Tab y la Dell
-    page_icon="🛡️"
-)
+# --- CONFIGURACIÓN DE PÁGINA ---
+st.set_page_config(page_title="SPSS Master Validator", layout="wide", page_icon="🛡️")
 
-# Estilo CSS extra para botones grandes en Android (Pixel 6)
+# --- ESTILOS PERSONALIZADOS (Buenas prácticas de diseño) ---
 st.markdown("""
     <style>
-    .stButton>button {
-        width: 100%;
-        height: 3em;
-        font-weight: bold;
-        border-radius: 10px;
-    }
-    [data-testid="stMetricValue"] {
-        font-size: 1.8rem;
-    }
+    .main { background-color: #f5f7f9; }
+    .stAlert { border-radius: 10px; }
+    .step-header { color: #1f77b4; font-weight: bold; font-size: 1.5rem; margin-bottom: 0.5rem; }
+    .instruction { color: #555; font-size: 0.95rem; margin-bottom: 1.5rem; }
+    div[data-testid="stExpander"] { border: 1px solid #d1d9e0; border-radius: 10px; background-color: white; }
     </style>
     """, unsafe_allow_html=True)
 
-# --- FUNCIONES DE AUDITORÍA LÓGICA ---
+# --- FUNCIONES DE SOPORTE ---
+def parse_kobo_sps(sps_content):
+    """Extrae metadatos del archivo .sps de KoboToolbox"""
+    var_labels = {}
+    value_labels = {}
+    
+    # 1. VARIABLE LABELS
+    var_match = re.search(r"VARIABLE LABELS(.*?)\.", sps_content, re.DOTALL | re.IGNORECASE)
+    if var_match:
+        entries = var_match.group(1).split('/')
+        for entry in entries:
+            clean = entry.strip()
+            if not clean: continue
+            parts = clean.split(None, 1)
+            if len(parts) == 2:
+                var_labels[parts[0].strip()] = parts[1].strip().strip("'")
+
+    # 2. VALUE LABELS
+    val_matches = re.findall(r"VALUE LABELS\s+(\w+)(.*?)\.", sps_content, re.DOTALL | re.IGNORECASE)
+    for var_name, values_block in val_matches:
+        v_map = {}
+        pairs = re.findall(r"['\"]?(\d+)['\"]?\s+['\"](.*?)['\"]", values_block)
+        for val, lab in pairs:
+            v_map[float(val)] = lab
+        value_labels[var_name] = v_map
+        
+    return var_labels, value_labels
+
 def detect_prohibited_chars(val):
     if not isinstance(val, str): return False
     return bool(re.search(r'[\r\n\x00-\x1f\x7f-\x9f]', val))
 
+# --- INTERFAZ PRINCIPAL ---
 def main():
-    st.title("🛡️ SPSS Master Flow")
-    st.caption("Estructura ADN ➔ Validación de Planchado ➔ Triple Exportación")
+    st.sidebar.title("🛠️ Centro de Control")
+    mode = st.sidebar.radio(
+        "Origen de Datos:",
+        ["KoboToolbox (Excel + SPS)", "LimeSurvey (SAV ADN)"],
+        help="Elija Kobo si tiene la sintaxis .sps y el Excel. Elija LimeSurvey si ya tiene un .sav generado."
+    )
+    
+    if st.sidebar.button("🔄 REINICIAR PROYECTO"):
+        st.session_state.clear()
+        st.rerun()
 
-    # --- SIDEBAR: CONTROL CENTRAL ---
-    with st.sidebar:
-        st.header("⚙️ Configuración")
-        uploaded_sav = st.file_uploader("📥 Subir SAV Original (ADN)", type=["sav"])
-        if st.button("🔄 REINICIAR SISTEMA"):
-            st.session_state.clear()
-            st.rerun()
-        st.divider()
-        st.info("Dispositivo detectado: Optimizado para táctil y escritorio.")
+    st.title("🛡️ SPSS Data Validator & Suite")
+    st.markdown("---")
 
-    if not uploaded_sav:
-        st.info("👈 Por favor, sube el archivo .sav base (el que generaste de LimeSurvey) para extraer las reglas del ADN de datos.")
+    # --- FLUJO DE CARGA ---
+    if 'meta' not in st.session_state:
+        st.markdown('<p class="step-header">Paso 0: Inyección de ADN (Metadatos)</p>', unsafe_allow_html=True)
+        
+        if mode == "KoboToolbox (Excel + SPS)":
+            c1, c2 = st.columns(2)
+            with c1:
+                uploaded_excel = st.file_uploader("📥 1. Subir Excel de Datos (Kobo)", type=["xlsx", "csv"])
+            with c2:
+                uploaded_sps = st.file_uploader("📥 2. Subir Sintaxis (.Sps)", type=["sps"])
+            
+            if uploaded_excel and uploaded_sps:
+                with st.spinner("Decodificando ADN de Kobo..."):
+                    df = pd.read_excel(uploaded_excel) if ".xlsx" in uploaded_excel.name else pd.read_csv(uploaded_excel)
+                    sps_text = uploaded_sps.read().decode("utf-8", errors="ignore")
+                    v_labels, val_labels = parse_kobo_sps(sps_text)
+                    
+                    st.session_state.df_orig = df
+                    st.session_state.meta_v_labels = v_labels
+                    st.session_state.meta_val_labels = val_labels
+                    st.session_state.all_cols = list(df.columns)
+                    st.session_state.meta = True # Flag de carga
+                    st.rerun()
+        
+        else: # MODO LIMESURVEY
+            uploaded_sav = st.file_uploader("📥 Subir archivo .SAV base", type=["sav"])
+            if uploaded_sav:
+                with st.spinner("Extrayendo ADN del SAV..."):
+                    with open("temp.sav", "wb") as f: f.write(uploaded_sav.getbuffer())
+                    df, meta = pyreadstat.read_sav("temp.sav")
+                    st.session_state.df_orig = df
+                    st.session_state.meta_v_labels = meta.column_names_to_labels
+                    st.session_state.meta_val_labels = meta.variable_value_labels
+                    st.session_state.all_cols = list(df.columns)
+                    st.session_state.meta = True
+                    os.remove("temp.sav")
+                    st.rerun()
         return
 
-    # --- LÓGICA DE SESIÓN (PERSISTENCIA) ---
-    if 'df_orig' not in st.session_state:
-        with st.spinner("Extrayendo ADN de variables..."):
-            input_path = "meta_base_temp.sav"
-            with open(input_path, "wb") as f:
-                f.write(uploaded_sav.getbuffer())
-            df_orig, meta = pyreadstat.read_sav(input_path)
-            st.session_state.df_orig = df_orig
-            st.session_state.meta = meta
-            st.session_state.all_cols = list(df_orig.columns)
-            if os.path.exists(input_path): os.remove(input_path)
+    # --- TABS DE TRABAJO (Flujo lógico para el analista) ---
+    tab1, tab2, tab3 = st.tabs(["📋 1. DICCIONARIO", "🔍 2. ADUANA DE DATOS", "💾 3. EXPORTACIÓN"])
 
-    # --- FLUJO POR PESTAÑAS (TABS) ---
-    t1, t2, t3 = st.tabs(["🌳 1. ADN & Estructura", "🔍 2. Auditoría de Planchado", "💾 3. Exportación Final"])
+    # TAB 1: Revisión de ADN
+    with tab1:
+        st.markdown('<p class="step-header">Estructura detectada</p>', unsafe_allow_html=True)
+        st.info("💡 Revise que las etiquetas se hayan cargado correctamente antes de proceder.")
+        
+        col_sel, col_info = st.columns([1, 2])
+        with col_sel:
+            cols_active = st.multiselect("Variables a incluir:", st.session_state.all_cols, default=st.session_state.all_cols)
+        
+        with col_info:
+            with st.expander("Ver Diccionario de Etiquetas (ADN)"):
+                df_dict = pd.DataFrame({
+                    "Variable": list(st.session_state.meta_v_labels.keys()),
+                    "Etiqueta": list(st.session_state.meta_v_labels.values())
+                })
+                st.table(df_dict.head(10))
 
-    # --- PASO 1: DEFINICIÓN DE ADN Y ENTREGA ---
-    with t1:
-        st.subheader("Paso 1: Filtrado de ADN")
-        st.write("Seleccione qué columnas formarán parte del proyecto.")
+    # TAB 2: La Aduana (Validación de Planchado)
+    with tab2:
+        st.markdown('<p class="step-header">Control de Calidad (Aduana)</p>', unsafe_allow_html=True)
+        st.markdown('<p class="instruction">Sube el archivo que el cliente "planchó" o corrigió. El sistema verificará que no haya roto el ADN.</p>', unsafe_allow_html=True)
         
-        cols_to_keep = st.multiselect(
-            "Variables activas (puedes borrar las que no necesites):", 
-            options=st.session_state.all_cols, 
-            default=st.session_state.all_cols
-        )
-        st.session_state.cols_active_step1 = cols_to_keep
+        planchado_file = st.file_uploader("📤 Subir Excel del Cliente", type=["xlsx"], key="planchado")
         
-        df_for_client = st.session_state.df_orig[cols_to_keep]
-
-        st.success("✅ Estructura definida. Ahora descarga el pack para trabajar.")
-        
-        c1, c2 = st.columns(2)
-        with c1:
-            # EXCEL para el cliente (Uso táctil mejorado)
-            out_xlsx = io.BytesIO()
-            df_for_client.to_excel(out_xlsx, index=False)
-            st.download_button(
-                label="📥 DESCARGAR EXCEL (Para el cliente)",
-                data=out_xlsx.getvalue(),
-                file_name="Estructura_Para_Cliente.xlsx",
-                mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-                use_container_width=True
-            )
-        with c2:
-            # SAV para el protocolo
-            temp_sav = "base_cliente.sav"
-            f_labels = {k: v for k, v in st.session_state.meta.column_names_to_labels.items() if k in cols_to_keep}
-            f_values = {k: v for k, v in st.session_state.meta.variable_value_labels.items() if k in cols_to_keep}
-            pyreadstat.write_sav(df_for_client, temp_sav, column_labels=f_labels, variable_value_labels=f_values)
-            with open(temp_sav, "rb") as f:
-                st.download_button("📥 DESCARGAR SPSS (Protocolo)", f, "Estructura_Cliente.sav", use_container_width=True)
-
-    # --- PASO 2: EL CICLO DE LA "ADUANA" (PLANCHADO) ---
-    with t2:
-        st.subheader("Paso 2: Aduana de Validación")
-        st.write("Sube el Excel que devolvió el cliente para pasar los controles de calidad.")
-        
-        excel_file = st.file_uploader("📤 Subir Excel del Cliente", type=["xlsx"])
-        
-        if excel_file:
-            df_excel = pd.read_excel(excel_file)
+        if planchado_file:
+            df_p = pd.read_excel(planchado_file)
+            errores = []
             
-            # Selector de teléfono para duplicados (automático si detecta 'tel' o 'cel')
-            phone_cols = [c for c in df_excel.columns if any(x in c.lower() for x in ['tel', 'cel', 'phone'])]
-            sel_phone = st.selectbox("Columna de Teléfono (Opcional):", [None] + phone_cols)
+            # Auditoría
+            for col in df_p.columns:
+                if col in st.session_state.meta_val_labels:
+                    valid_codes = set(st.session_state.meta_val_labels[col].keys())
+                    # Check de códigos fuera de rango
+                    invalid = df_p[~df_p[col].isin(valid_codes) & df_p[col].notnull()]
+                    for idx in invalid.index:
+                        errores.append({"Fila": idx+2, "Variable": col, "Error": "Código no existe en ADN", "Valor": df_p.at[idx, col]})
 
-            # --- MOTOR DE AUDITORÍA PROFUNDO ---
-            log_errores = []
-            style_map = pd.DataFrame('', index=df_excel.index, columns=df_excel.columns)
-
-            for col in df_excel.columns:
-                if col in st.session_state.all_cols:
-                    is_numeric_dna = pd.api.types.is_numeric_dtype(st.session_state.df_orig[col])
-                    
-                    for idx, val in df_excel[col].items():
-                        # Control 1: Caracteres raros / Saltos de línea
-                        if detect_prohibited_chars(val):
-                            log_errores.append({"Fila": idx+2, "Columna": col, "Error": "Caracter prohibido", "Valor": val})
-                            style_map.at[idx, col] = 'background-color: #ff9800; color: white'
-
-                        # Control 2: Sintaxis de Tipo (Número vs Texto)
-                        if is_numeric_dna and pd.notnull(val):
-                            try: float(val)
-                            except:
-                                log_errores.append({"Fila": idx+2, "Columna": col, "Error": "Texto en columna numérica", "Valor": val})
-                                style_map.at[idx, col] = 'background-color: #f44336; color: white'
-
-            # Control 3: Duplicados de teléfono
-            if sel_phone:
-                dups = df_excel[df_excel[sel_phone].duplicated(keep=False) & df_excel[sel_phone].notnull()]
-                for idx in dups.index:
-                    log_errores.append({"Fila": idx+2, "Columna": sel_phone, "Error": "Teléfono DUPLICADO", "Valor": df_excel.at[idx, sel_phone]})
-                    style_map.at[idx, sel_phone] = 'background-color: #ffff00; color: black'
-
-            # --- GESTIÓN DE DEVOLUCIÓN ---
-            if log_errores:
+            if errores:
+                st.error(f"⚠️ Se detectaron {len(errores)} inconsistencias críticas.")
+                st.dataframe(pd.DataFrame(errores))
                 st.session_state.apto = False
-                st.error(f"❌ ARCHIVO RECHAZADO: Se encontraron {len(log_errores)} errores.")
+            else:
+                st.success("✅ Datos consistentes con el ADN. Listo para exportar.")
+                st.session_state.apto = True
+                st.session_state.df_ready = df_p
+
+    # TAB 3: Exportación
+    with tab3:
+        if st.session_state.get('apto', False):
+            st.markdown('<p class="step-header">Generación de Entregables</p>', unsafe_allow_html=True)
+            
+            c1, c2 = st.columns(2)
+            with c1:
+                filename = st.text_input("Nombre del archivo:", "Data_Final_Trendsity")
+            with c2:
+                st.write("Presione para generar el archivo .sav oficial.")
                 
-                # Crear Excel de Devolución con dos hojas
-                out_audit = io.BytesIO()
-                with pd.ExcelWriter(out_audit, engine='openpyxl') as writer:
-                    df_excel.style.apply(lambda x: style_map, axis=None).to_excel(writer, sheet_name='CORREGIR_AQUI', index=False)
-                    pd.DataFrame(log_errores).to_excel(writer, sheet_name='INFORME_DE_ERRORES', index=False)
-                
+            # Generar SAV
+            buf = io.BytesIO()
+            path_tmp = "export.sav"
+            pyreadstat.write_sav(
+                st.session_state.df_ready, 
+                path_tmp,
+                column_labels=st.session_state.meta_v_labels,
+                variable_value_labels=st.session_state.meta_val_labels
+            )
+            with open(path_tmp, "rb") as f:
                 st.download_button(
-                    label="📥 DESCARGAR EXCEL DE RECHAZO (Enviar al cliente)",
-                    data=out_audit.getvalue(),
-                    file_name="RECHAZO_POR_ERRORES.xlsx",
-                    mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+                    "💾 DESCARGAR SPSS (.SAV)",
+                    f,
+                    file_name=f"{filename}.sav",
                     use_container_width=True
                 )
-                with st.expander("Ver detalle de errores en pantalla"):
-                    st.table(pd.DataFrame(log_errores))
-            else:
-                st.success("✅ ¡TODO PERFECTO! El archivo ha pasado la validación. Ve al Paso 3.")
-                st.session_state.apto = True
-                st.session_state.df_planchado = df_excel
         else:
-            st.info("Esperando carga del archivo del cliente...")
-
-    # --- PASO 3: CONFIGURACIÓN FINAL Y TRIPLE DESCARGA ---
-    with t3:
-        if st.session_state.get('apto', False):
-            st.subheader("Paso 3: Exportación Maestra")
-            st.write("Filtre columnas finales si es necesario y genere sus archivos.")
-            
-            # Borrado final (Post-planchado)
-            cols_final = st.multiselect(
-                "Desactive columnas que NO desee en el SAV final:", 
-                options=list(st.session_state.df_planchado.columns), 
-                default=list(st.session_state.df_planchado.columns)
-            )
-            df_final = st.session_state.df_planchado[cols_final]
-            
-            proj_name = st.text_input("Nombre del Proyecto:", "Resultado_Validado")
-            st.divider()
-
-            # Triple columna de exportación
-            col_a, col_b, col_c = st.columns(3)
-
-            with col_a:
-                st.write("📊 **SPSS SAV**")
-                st.caption("DNA e Inteligencia inyectada.")
-                path_sav = "final_output.sav"
-                pyreadstat.write_sav(
-                    df_final, path_sav, 
-                    column_labels={k: v for k, v in st.session_state.meta.column_names_to_labels.items() if k in df_final.columns},
-                    variable_value_labels={k: v for k, v in st.session_state.meta.variable_value_labels.items() if k in df_final.columns}
-                )
-                with open(path_sav, "rb") as f:
-                    st.download_button("📥 Descargar SAV", f, f"{proj_name}.sav", use_container_width=True)
-
-            with col_b:
-                st.write("📖 **Excel LECTURA**")
-                st.caption("Códigos traducidos a texto.")
-                df_human = df_final.copy()
-                for col in df_human.columns:
-                    if col in st.session_state.meta.variable_value_labels:
-                        df_human[col] = df_human[col].map(st.session_state.meta.variable_value_labels[col]).fillna(df_human[col])
-                out_h = io.BytesIO()
-                df_human.to_excel(out_h, index=False)
-                st.download_button("📥 Descargar Excel Texto", out_h.getvalue(), f"{proj_name}_Lectura.xlsx", use_container_width=True)
-
-            with col_c:
-                st.write("🔢 **Excel CÓDIGOS**")
-                st.caption("Puros números para análisis.")
-                out_c = io.BytesIO()
-                df_final.to_excel(out_c, index=False)
-                st.download_button("📥 Descargar Excel Números", out_c.getvalue(), f"{proj_name}_Codigos.xlsx", use_container_width=True)
-            
-            st.balloons() # Pequeña celebración al terminar con éxito
-
-        else:
-            st.warning("⚠️ ACCESO RESTRINGIDO: El Paso 3 se activará automáticamente cuando subas un Excel sin errores en el Paso 2.")
+            st.warning("🔒 El flujo de exportación está bloqueado. Primero debe validar los datos en la pestaña 'Aduana'.")
 
 if __name__ == "__main__":
     main()
