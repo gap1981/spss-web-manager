@@ -6,19 +6,26 @@ import os
 import re
 
 # --- CONFIGURACIÓN DE PÁGINA ---
-st.set_page_config(page_title="SPSS Master Flow", layout="wide", page_icon="🛡️")
+st.set_page_config(page_title="SPSS Master Flow Pro", layout="wide", page_icon="🛡️")
 
-# --- LOGOS ---
-LOGO_SPSS = "https://upload.wikimedia.org/wikipedia/commons/thumb/7/7b/IBM_SPSS_Statistics_logo.svg/128px-IBM_SPSS_Statistics_logo.svg.png"
-LOGO_KOBO = "https://get.kobotoolbox.org/favicon.png"
+# --- ESTILOS VISUALES ---
+st.markdown("""
+    <style>
+    .main { background-color: #f0f2f6; }
+    .stTabs [data-baseweb="tab-list"] { gap: 10px; }
+    .stTabs [data-baseweb="tab"] {
+        background-color: #ffffff; border-radius: 10px 10px 0px 0px; padding: 10px 20px; border: 1px solid #ddd;
+    }
+    .stTabs [aria-selected="true"] { background-color: #1f77b4 !important; color: white !important; }
+    </style>
+    """, unsafe_allow_html=True)
 
-# --- MOTOR DE ADN MEJORADO ---
-def parse_sps_metadata_v6(sps_content):
-    """Extrae etiquetas de variables y categorías (Value Labels) normalizando nombres."""
+# --- MOTOR DE ADN (NORMALIZADO) ---
+def parse_sps_metadata_v7(sps_content):
     var_labels = {}
     value_labels = {}
     
-    # Normalización del texto del SPS
+    # Normalización del texto
     text = sps_content.replace('\r', ' ').replace('\n', ' ')
     text = re.sub(r'\s+', ' ', text)
 
@@ -27,21 +34,19 @@ def parse_sps_metadata_v6(sps_content):
     if var_match:
         entries = re.findall(r"(?:/|^)\s*(\S+)\s+['\"](.*?)['\"]", var_match.group(1))
         for var_name, label in entries:
-            # Normalizamos el nombre del SPS a formato estándar (con _)
+            # Aquí ya guardamos todo con guion bajo para que coincida con el Excel limpio
             clean_name = var_name.strip().replace('/', '_')
             var_labels[clean_name] = label
 
-    # 2. VALUE LABELS (Soporta códigos de texto y números)
+    # 2. VALUE LABELS
     val_blocks = re.findall(r"VALUE LABELS\s+(.*?)\.", text, re.IGNORECASE)
     for block in val_blocks:
         block = block.strip()
         first_quote = re.search(r"['\"]", block)
         if not first_quote: continue
-        
         vars_part = block[:first_quote.start()].strip()
         labels_part = block[first_quote.start():].strip()
         
-        # Normalizar nombres de variables del bloque
         var_names = [v.replace('/', '_') for v in re.split(r"[\s/]+", vars_part) if v]
         pairs = re.findall(r"['\"]([^'\"]+)['\"]\s+['\"]([^'\"]+)['\"]", labels_part)
         
@@ -53,95 +58,100 @@ def parse_sps_metadata_v6(sps_content):
     return var_labels, value_labels
 
 def main():
-    # --- HEADER VISUAL ---
-    c_img1, c_title, c_img2 = st.columns([1, 4, 1])
-    with c_img1: st.image(LOGO_SPSS, width=80)
-    with c_title: 
-        st.title("🛡️ SPSS Master Flow Pro")
-        st.caption("Trendsity | Limpieza automática de cabeceras Kobo ( / ➔ _ )")
-    with c_img2: st.image(LOGO_KOBO, width=60)
-
-    # --- SIDEBAR: CHECKLIST ---
+    # --- BARRA LATERAL: CHECKLIST ---
     with st.sidebar:
-        st.header("📋 Estado del Proyecto")
+        st.header("📋 PROGRESO")
+        
+        # Lógica de checks
         s1 = "✅" if st.session_state.get('meta_loaded') else "❌"
         s2 = "✅" if st.session_state.get('excel_downloaded') else "⏳"
         s3 = "✅" if st.session_state.get('apto') else "❌"
         
-        st.write(f"{s1} 1. ADN Inyectado")
-        st.write(f"{s2} 2. Pack Excel Limpio")
-        st.write(f"{s3} 3. Aduana Superada")
+        st.info(f"""
+        **PASO A PASO:**
+        1. {s1} Estructura Cargada
+        2. {s2} Excel Limpio Descargado
+        3. {s3} Validación (Aduana)
+        4. {'✅' if s3 == '✅' else '🔒'} Exportación SAV
+        """)
         
         st.divider()
-        if st.button("🔄 REINICIAR TODO"):
+        if st.button("🔄 REINICIAR PROYECTO"):
             st.session_state.clear()
             st.rerun()
 
+    # --- ENCABEZADO ---
+    col1, col2 = st.columns([4, 1])
+    with col1:
+        st.title("🛡️ SPSS Master Flow Pro")
+        st.caption("Ecosistema de Validación de Datos | Trendsity")
+    with col2:
+        st.write("📊 **SPSS**")
+        st.write("📈 **KOBO**")
+
+    # --- SELECTOR DE ORIGEN ---
+    mode = st.radio("Seleccione el origen de los datos:", 
+                    ["KoboToolbox (Excel + SPS)", "LimeSurvey (Archivo SAV)"], horizontal=True)
+
     # --- PASO 0: CARGA Y LIMPIEZA AUTOMÁTICA ---
     if 'meta_loaded' not in st.session_state:
-        mode = st.radio("Estructura de origen:", ["KoboToolbox", "LimeSurvey"], horizontal=True)
-        
-        if mode == "KoboToolbox":
-            st.info("### 1. Sube tus archivos de Kobo\nEl sistema reemplazará automáticamente las barras `/` de los nombres por `_`.")
+        if mode == "KoboToolbox (Excel + SPS)":
             c1, c2 = st.columns(2)
-            with c1: f_excel = st.file_uploader("📥 Datos Excel", type=["xlsx"])
-            with c2: f_sps = st.file_uploader("📥 Sintaxis .SPS", type=["sps"])
+            with c1: f_excel = st.file_uploader("📥 Excel de Kobo", type=["xlsx"])
+            with c2: f_sps = st.file_uploader("📥 Sintaxis SPS", type=["sps"])
             
             if f_excel and f_sps:
-                with st.spinner("Limpiando cabeceras y cargando ADN..."):
+                with st.spinner("Limpiando cabeceras ( / -> _ ) y cargando ADN..."):
                     df = pd.read_excel(f_excel)
-                    # --- LIMPIEZA AUTOMÁTICA DE CABECERAS ---
-                    df.columns = [c.replace('/', '_') for c in df.columns]
+                    # LIMPIEZA AUTOMÁTICA INMEDIATA
+                    df.columns = [str(c).replace('/', '_') for c in df.columns]
                     
                     sps_text = f_sps.read().decode("latin-1")
-                    v_labels, val_labels = parse_sps_metadata_v6(sps_text)
+                    v_labels, val_labels = parse_sps_metadata_v7(sps_text)
                     
                     st.session_state.update({
                         'df_orig': df, 'v_labels': v_labels, 'val_labels': val_labels,
-                        'all_cols': list(df.columns), 'meta_loaded': True, 'mode': 'kobo'
+                        'all_cols': list(df.columns), 'meta_loaded': True
                     })
                     st.rerun()
         else:
-            # [Modo LimeSurvey similar al anterior...]
-            f_sav = st.file_uploader("📥 Archivo SAV", type=["sav"])
+            f_sav = st.file_uploader("📥 Subir archivo .SAV base", type=["sav"])
             if f_sav:
                 with open("temp.sav", "wb") as f: f.write(f_sav.getbuffer())
                 df, meta = pyreadstat.read_sav("temp.sav")
                 st.session_state.update({
                     'df_orig': df, 'v_labels': meta.column_names_to_labels, 
-                    'val_labels': meta.variable_value_labels, 'all_cols': list(df.columns), 
-                    'meta_loaded': True, 'mode': 'limesurvey'
+                    'val_labels': meta.variable_value_labels, 
+                    'all_cols': list(df.columns), 'meta_loaded': True
                 })
                 os.remove("temp.sav")
                 st.rerun()
         return
 
     # --- TABS DE TRABAJO ---
-    t1, t2, t3 = st.tabs(["🌳 ADN & PACK LIMPIO", "🔍 ADUANA", "🚀 EXPORTAR"])
+    t1, t2, t3 = st.tabs(["🌳 1. ADN & PACK LIMPIO", "🔍 2. ADUANA", "🚀 3. SAV FINAL"])
 
     with t1:
-        st.markdown("### 🧬 ADN y Template de Trabajo")
-        st.write("Abajo puedes ver cómo quedaron los nombres de columna tras la limpieza.")
+        st.subheader("Paso 1: Diccionario y Preparación")
+        st.write("El sistema ha corregido los nombres de las columnas automáticamente.")
         
-        col_res, col_pack = st.columns([2, 1])
+        col_res, col_down = st.columns([2, 1])
         with col_res:
             resumen = []
             for c in st.session_state.all_cols:
                 label = st.session_state.v_labels.get(c, "❌ NO ENCONTRADA EN SPS")
-                dict_status = "✅ OK" if c in st.session_state.val_labels else "---"
-                resumen.append({"Variable (Limpia)": c, "Etiqueta SPSS": label, "Diccionario": dict_status})
+                resumen.append({"Columna Limpia": c, "Etiqueta": label, "Diccionario": "✅ OK" if c in st.session_state.val_labels else "---"})
             st.dataframe(pd.DataFrame(resumen), height=350)
             
-        with col_pack:
-            st.success("✨ Cabeceras corregidas")
+        with col_down:
+            st.info("Descarga este Excel corregido para dárselo al cliente:")
             out_xlsx = io.BytesIO()
             st.session_state.df_orig.to_excel(out_xlsx, index=False)
-            if st.download_button("📥 DESCARGAR EXCEL PARA CLIENTE", out_xlsx.getvalue(), "Base_Limpia_Para_Planchado.xlsx", use_container_width=True):
+            if st.download_button("📥 DESCARGAR EXCEL PARA CLIENTE", out_xlsx.getvalue(), "Estructura_Limpia.xlsx", use_container_width=True):
                 st.session_state.excel_downloaded = True
-            st.caption("Este Excel ya tiene las cabeceras corregidas (ej: F9_1). Pídele al cliente que no las toque.")
 
     with t2:
-        st.markdown("### 🔍 Aduana de Validación")
+        st.subheader("Paso 2: Aduana de Calidad")
         f_p = st.file_uploader("📤 Subir Excel Planchado por Cliente", type=["xlsx"])
         if f_p:
             df_p = pd.read_excel(f_p)
@@ -150,24 +160,23 @@ def main():
                 if col in st.session_state.val_labels:
                     valid_codes = set(str(k) for k in st.session_state.val_labels[col].keys())
                     for idx, val in df_p[col].items():
-                        # Validar si el valor existe en el diccionario (como string para evitar líos de tipos)
                         if pd.notnull(val) and str(val) not in valid_codes:
                             errores.append({"Fila": idx+2, "Variable": col, "Error": "Código inválido", "Valor": val})
             
             if errores:
-                st.error(f"❌ Errores detectados: {len(errores)}")
+                st.error(f"❌ Se encontraron {len(errores)} inconsistencias.")
                 st.dataframe(pd.DataFrame(errores).head(50))
                 st.session_state.apto = False
             else:
-                st.success("✅ Validación superada. Los datos son consistentes con el ADN.")
+                st.success("✅ ¡Base impecable! Lista para exportar.")
                 st.session_state.apto = True
                 st.session_state.df_final = df_p
 
     with t3:
         if st.session_state.get('apto'):
-            st.subheader("🚀 Generación de SAV Final")
-            name = st.text_input("Nombre del archivo:", "Trendsity_Data_Final")
-            if st.button("GENERAR Y DESCARGAR"):
+            st.subheader("Paso 3: Exportación Final")
+            name = st.text_input("Nombre del archivo:", "Base_Trendsity_Final")
+            if st.button("🚀 GENERAR Y DESCARGAR SAV OFICIAL"):
                 path_sav = f"{name}.sav"
                 pyreadstat.write_sav(
                     st.session_state.df_final, path_sav,
@@ -178,7 +187,7 @@ def main():
                     st.download_button("📥 Bajar archivo .sav", f, path_sav, use_container_width=True)
                 st.balloons()
         else:
-            st.warning("🔒 Debes completar la validación en la pestaña 'Aduana'.")
+            st.warning("🔒 Debes completar la validación en la pestaña 'Aduana' para habilitar la exportación.")
 
 if __name__ == "__main__":
     main()
