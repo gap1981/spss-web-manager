@@ -1,10 +1,9 @@
 [theme]
-primaryColor = "#007bff"
-backgroundColor = "#ffffff"
-secondaryBackgroundColor = "#f0f2f6"
-textColor = "#262730"
+primaryColor = "#2E7D32"
+backgroundColor = "#FFFFFF"
+secondaryBackgroundColor = "#F1F8E9"
+textColor = "#212121"
 font = "sans serif"
-
 [server]
 # Permite subir archivos de LimeSurvey de hasta 200MB
 maxUploadSize = 200
