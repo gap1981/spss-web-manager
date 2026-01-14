@@ -2,4 +2,3 @@ streamlit
 pandas
 pyreadstat
 openpyxl
-jinja2
