@@ -4,154 +4,116 @@ import pyreadstat
 import io
 import re
 
-# Configuración de interfaz estilo Jamovi
+# Configuración estilo Jamovi
 st.set_page_config(page_title="SPSS Web Manager Pro", layout="wide", page_icon="📊")
 
 # --- MOTOR DE TRADUCCIÓN SPS ---
 
 def parse_sps_syntax(sps_content):
-    """
-    Extrae etiquetas de variables y de valores desde un archivo .sps.
-    Normaliza los nombres con la misma lógica que el Excel.
-    """
     var_labels = {}
     value_labels = {}
-    
     try:
         text = sps_content.decode('utf-8')
     except:
         text = sps_content.decode('latin-1')
 
-    # VARIABLE LABELS
+    # VARIABLE LABELS: Captura exacta del nombre tal cual aparece tras el '/'
     var_matches = re.findall(r'VARIABLE LABELS\s+([\w\./_]+)\s+[\'"](.+?)[\'"]', text, re.IGNORECASE)
     for var, label in var_matches:
-        # Aplicamos la lógica de normalización solicitada
-        clean_var = var.replace('/', '_')
-        if '/' in var:
-            clean_var = 'P' + var.split('/')[-1]
+        # Si tiene grupo en el SPS, aplicamos la regla de la Doble P
+        clean_var = 'P' + var.split('/')[-1] if '/' in var else var
         var_labels[clean_var] = label
 
     # VALUE LABELS
     value_blocks = re.findall(r'VALUE LABELS\s+([\w\./_]+)\s+(.+?)\.', text, re.DOTALL | re.IGNORECASE)
     for var, labels_raw in value_blocks:
-        clean_var = var.replace('/', '_')
-        if '/' in var:
-            clean_var = 'P' + var.split('/')[-1]
-            
-        pairs = re.findall(r"['\"]?(\d+)['\"]?\s+['\"](.+?)['\"]", labels_raw)
+        clean_var = 'P' + var.split('/')[-1] if '/' in var else var
+        pairs = re.findall(r"['\"]?(\d+)['\"]?\s+['\"](.+?)[\'"]", labels_raw)
         if pairs:
             value_labels[clean_var] = {float(k): v for k, v in pairs}
 
     return var_labels, value_labels
 
-# --- COMPATIBILIZADOR DE COLUMNAS (Lógica de Doble P) ---
+# --- COMPATIBILIZADOR DE EXCEL ---
 
-def fix_kobo_columns(df):
+def process_kobo_columns(df):
     """
-    1. Convierte / en _ (Compatibilidad con SPS).
-    2. Si hay un grupo, antepone una 'P' al nombre (P1 -> PP1) para evitar duplicados.
-    3. Asegura nombres únicos.
+    Aplica la regla de la Doble P: 
+    Si la columna tiene '/', se vuelve 'P' + nombre.
+    Si NO tiene '/', se queda EXACTAMENTE igual.
     """
     new_names = []
-    seen = {}
-
     for col in df.columns:
         col_str = str(col)
-        
-        # Lógica solicitada: Si tiene barra, es de grupo.
         if '/' in col_str:
-            # P1 dentro de grupo se vuelve PP1
-            clean_name = 'P' + col_str.split('/')[-1].replace('/', '_')
+            # Caso grupo: encuesta/P1 -> PP1
+            clean_name = 'P' + col_str.split('/')[-1]
         else:
-            # Si no tiene barra, solo cambiamos posibles / internos por _
-            clean_name = col_str.replace('/', '_')
+            # Caso normal: P5_1 -> se queda como P5_1
+            clean_name = col_str
         
-        # Evitar palabra reservada _index
+        # Evitar el nombre reservado de Streamlit
         if clean_name == "_index":
             clean_name = "id_kobo"
-
-        # Verificación final de unicidad (Parche de seguridad)
-        if clean_name in seen:
-            seen[clean_name] += 1
-            clean_name = f"{clean_name}_{seen[clean_name]}"
-        else:
-            seen[clean_name] = 0
             
         new_names.append(clean_name)
     
     df.columns = new_names
     return df
 
-# --- INTERFAZ DE USUARIO ---
+# --- INTERFAZ ---
 
 st.title("📊 SPSS Universal Manager")
-st.markdown("### Flujo optimizado para Kobo (Excel + SPS) y LimeSurvey")
+st.subheader("Cuesta Blanca 2025 - Flujo Optimizado")
 
 with st.sidebar:
-    st.header("📁 Cargar Archivos")
-    data_file = st.file_uploader("1. Archivo de DATOS (.xlsx, .csv, .dat)", type=["xlsx", "csv", "dat", "txt", "sav"])
-    sps_file = st.file_uploader("2. Archivo de SINTAXIS (.sps)", type=["sps"])
+    st.header("📁 Carga")
+    data_file = st.file_uploader("1. Subir Datos (Excel/CSV)", type=["xlsx", "csv", "dat"])
+    sps_file = st.file_uploader("2. Subir Sintaxis (.sps)", type=["sps"])
 
 if data_file:
-    try:
-        # Carga de datos
-        if data_file.name.endswith('.sav'):
-            raw_bytes = data_file.read()
-            try:
-                df, meta = pyreadstat.read_sav(io.BytesIO(raw_bytes), encoding="utf-8")
-            except:
-                df, meta = pyreadstat.read_sav(io.BytesIO(raw_bytes), encoding="latin-1")
-            var_labels = dict(zip(df.columns, meta.column_labels))
-            val_labels = meta.variable_value_labels
-        elif data_file.name.endswith('.xlsx'):
-            df = pd.read_excel(data_file)
-            var_labels, val_labels = {}, {}
-        else:
-            df = pd.read_csv(data_file, sep=None, engine='python')
-            var_labels, val_labels = {}, {}
+    # Cargar el archivo (CSV o Excel)
+    if data_file.name.endswith('.csv'):
+        df = pd.read_csv(data_file)
+    elif data_file.name.endswith('.xlsx'):
+        df = pd.read_excel(data_file)
+    else:
+        df = pd.read_csv(data_file, sep=None, engine='python')
 
-        # Aplicar compatibilización de nombres (Doble P para grupos)
-        df = fix_kobo_columns(df)
+    # PROCESO: Cambiamos nombres según tu regla
+    df = process_kobo_columns(df)
+    
+    var_labels, val_labels = {}, {}
+    if sps_file:
+        var_labels, val_labels = parse_sps_syntax(sps_file.read())
+        st.sidebar.success(f"✅ Sintaxis vinculada")
 
-        # Procesar Sintaxis
-        if sps_file:
-            s_vars, s_vals = parse_sps_syntax(sps_file.read())
-            var_labels.update(s_vars)
-            val_labels.update(s_vals)
-            st.sidebar.success("✅ Metadatos vinculados con éxito")
+    tab1, tab2 = st.tabs(["📋 Hoja de Datos", "🔍 Vista de Variables"])
 
-        # Pestañas Jamovi
-        tab1, tab2 = st.tabs(["📋 Vista de Datos", "🔍 Vista de Variables"])
+    with tab1:
+        # Mapeo visual de etiquetas para el usuario
+        df_visual = df.copy()
+        for col, mapping in val_labels.items():
+            if col in df_visual.columns:
+                try:
+                    df_visual[col] = df_visual[col].map(mapping).fillna(df_visual[col])
+                except: pass
+        
+        st.data_editor(df_visual, width="stretch")
 
-        with tab1:
-            # Mapeo visual de etiquetas
-            df_visual = df.copy()
-            for col, mapping in val_labels.items():
-                if col in df_visual.columns:
-                    try:
-                        df_visual[col] = df_visual[col].map(mapping).fillna(df_visual[col])
-                    except: pass
-            
-            st.data_editor(df_visual, width="stretch", num_rows="dynamic")
+    with tab2:
+        st.subheader("Diccionario extraído")
+        meta_summary = pd.DataFrame({
+            "Variable": df.columns,
+            "Etiqueta": [var_labels.get(c, "No definida") for c in df.columns]
+        })
+        st.dataframe(meta_summary, width="stretch")
 
-        with tab2:
-            st.subheader("Diccionario de Metadatos")
-            meta_df = pd.DataFrame({
-                "Variable": df.columns,
-                "Etiqueta": [var_labels.get(c, "No encontrada en SPS") for c in df.columns],
-                "Valores": ["✅ Sí" if c in val_labels else "❌ No" for c in df.columns]
-            })
-            st.dataframe(meta_df, width="stretch")
-
-        # Exportar
-        if st.button("🚀 Descargar Archivo SAV"):
-            labels_list = [var_labels.get(c, "") for c in df.columns]
-            output = "datos_finales_etiquetados.sav"
-            pyreadstat.write_sav(df, output, column_labels=labels_list, variable_value_labels=val_labels)
-            with open(output, "rb") as f:
-                st.download_button("⬇️ Descargar SAV", f, file_name="kobo_processed.sav")
-
-    except Exception as e:
-        st.error(f"Error: {e}")
+    if st.button("🚀 Descargar SAV Final"):
+        output = "cuesta_blanca_etiquetado.sav"
+        labels_list = [var_labels.get(c, "") for c in df.columns]
+        pyreadstat.write_sav(df, output, column_labels=labels_list, variable_value_labels=val_labels)
+        with open(output, "rb") as f:
+            st.download_button("⬇️ Descargar SAV", f, file_name="cuesta_blanca_2025.sav")
 else:
-    st.info("Sube tus archivos para comenzar.")
+    st.info("Sube tus archivos para iniciar.")
