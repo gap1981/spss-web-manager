@@ -3,17 +3,16 @@ import pandas as pd
 import pyreadstat
 import io
 import re
-import os
 
-# Configuración de pantalla completa estilo Jamovi
-st.set_page_config(page_title="SPSS Web Manager Pro", layout="wide", page_icon="📊")
+# Configuración de página estilo Jamovi
+st.set_page_config(page_title="SPSS Universal Manager", layout="wide", page_icon="📊")
 
-# --- LÓGICA DE PROCESAMIENTO ---
+# --- MOTOR DE TRADUCCIÓN ---
 
 def parse_sps_syntax(sps_content):
     """
-    Extrae etiquetas de variables y de valores desde un archivo .sps.
-    Maneja codificaciones mixtas para evitar caracteres rotos.
+    Extrae etiquetas de variables y valores. 
+    Limpia nombres (quita grupos y cambia / por _) para que coincidan con el Excel.
     """
     var_labels = {}
     value_labels = {}
@@ -23,145 +22,131 @@ def parse_sps_syntax(sps_content):
     except:
         text = sps_content.decode('latin-1')
 
-    # VARIABLE LABELS: Extrae el nombre y la descripción
-    var_matches = re.findall(r'VARIABLE LABELS\s+([\w\.]+)\s+"(.+?)"', text, re.IGNORECASE)
+    # VARIABLE LABELS: Captura nombres incluso con puntos o barras
+    # Ajuste para Kobo/LimeSurvey: P2/1 -> P2_1
+    var_matches = re.findall(r'VARIABLE LABELS\s+([\w\./_]+)\s+"(.+?)"', text, re.IGNORECASE)
     for var, label in var_matches:
-        # Limpieza de nombres de Kobo: grupo/pregunta -> pregunta
-        clean_var = var.split('/')[-1]
+        clean_var = var.split('/')[-1].replace('/', '_')
         var_labels[clean_var] = label
 
-    # VALUE LABELS: Mapea códigos numéricos a texto (ej: 1 -> "Sí")
-    value_blocks = re.findall(r'VALUE LABELS\s+([\w\.]+)\s+(.+?)\.', text, re.DOTALL | re.IGNORECASE)
+    # VALUE LABELS: Mapea códigos (1 -> "Sí")
+    # Soporta formatos con comillas simples o dobles
+    value_blocks = re.findall(r'VALUE LABELS\s+([\w\./_]+)\s+(.+?)\.', text, re.DOTALL | re.IGNORECASE)
     for var, labels_raw in value_blocks:
-        clean_var = var.split('/')[-1]
-        pairs = re.findall(r'(\d+)\s+"(.+?)"', labels_raw)
+        clean_var = var.split('/')[-1].replace('/', '_')
+        pairs = re.findall(r"['\"]?(\d+)['\"]?\s+['\"](.+?)['\"]", labels_raw)
         if pairs:
-            # SPSS usa floats internamente para códigos numéricos
+            # Los códigos en SPSS suelen ser números (float en pandas)
             value_labels[clean_var] = {float(k): v for k, v in pairs}
 
     return var_labels, value_labels
 
-def clean_dataframe(df):
+def compatibilize_data(df):
     """
-    Limpia el dataframe de nombres reservados y prefijos de grupo.
+    Normaliza los nombres de las columnas:
+    1. Elimina prefijos de grupo.
+    2. Convierte P1/1 en P1_1 (Crucial para Kobo).
+    3. Evita errores de nombres reservados.
     """
-    # 1. Eliminar prefijos de grupos de Kobo en los nombres de columnas
-    df.columns = [col.split('/')[-1] for col in df.columns]
+    new_cols = {}
+    for col in df.columns:
+        # Quitamos grupos y cambiamos / por _
+        clean_name = str(col).split('/')[-1].replace('/', '_')
+        
+        # Evitar el error de Streamlit con '_index'
+        if clean_name == "_index":
+            clean_name = "id_registro"
+            
+        new_cols[col] = clean_name
     
-    # 2. SOLUCIÓN AL ERROR: Renombrar '_index' porque Streamlit lo reserva
-    if "_index" in df.columns:
-        df = df.rename(columns={"_index": "id_fila_kobo"})
-    
-    return df
+    return df.rename(columns=new_cols)
 
-# --- INTERFAZ GRÁFICA ---
+# --- INTERFAZ ---
 
-st.title("📊 SPSS Web Manager (Kobo & LimeSurvey)")
-st.markdown("---")
+st.title("📊 SPSS Web Manager")
+st.caption("Compatible con archivos de LimeSurvey (ExportSPSS) y KoboToolbox")
 
 with st.sidebar:
-    st.header("📁 Carga de Archivos")
-    tipo_origen = st.selectbox("Selecciona tu flujo:", 
-                               ["KoboToolbox (XLSX + SPS)", 
-                                "LimeSurvey (DAT + SPS)", 
-                                "SAV Existente (Arreglar etiquetas)"])
+    st.header("📁 Cargar Archivos")
+    origen = st.radio("Tipo de proyecto:", ["Kobo (Excel/CSV + SPS)", "LimeSurvey (.dat + .sps)"])
     
-    uploaded_data = st.file_uploader("1. Archivo de DATOS (.xlsx, .dat, .sav)", type=["xlsx", "dat", "sav", "csv"])
-    uploaded_sps = st.file_uploader("2. Archivo de SINTAXIS (.sps)", type=["sps"])
-    
-    st.markdown("---")
-    st.caption("v2.1 - Compatible con Android y PC")
+    # Adaptamos el uploader según el origen
+    if origen == "LimeSurvey (.dat + .sps)":
+        data_file = st.file_uploader("Subir archivo .dat o .csv", type=["dat", "csv", "txt"])
+    else:
+        data_file = st.file_uploader("Subir Excel/CSV de Kobo", type=["xlsx", "csv"])
+        
+    sps_file = st.file_uploader("Subir archivo de Sintaxis (.sps)", type=["sps"])
 
-if uploaded_data:
-    df = pd.DataFrame()
-    var_labels, val_labels = {}, {}
-    
-    # --- 1. CARGA SEGÚN ORIGEN ---
+if data_file:
+    # 1. Leer Datos (Lógica para LimeSurvey .dat y Kobo .xlsx)
     try:
-        if tipo_origen == "KoboToolbox (XLSX + SPS)":
-            df = pd.read_excel(uploaded_data)
-            df = clean_dataframe(df)
-            
-        elif tipo_origen == "LimeSurvey (DAT + SPS)":
-            # Detectar si el .dat es CSV o ancho fijo (por defecto CSV/TSV)
-            df = pd.read_csv(uploaded_data, sep=None, engine='python')
-            df = clean_dataframe(df)
-            
-        elif tipo_origen == "SAV Existente (Arreglar etiquetas)":
-            raw_bytes = uploaded_data.read()
-            try:
-                # Intento UTF-8 solicitado
-                df, meta = pyreadstat.read_sav(io.BytesIO(raw_bytes), encoding="utf-8")
-                # Si detectamos etiquetas rotas (Ã), forzamos fallback
-                if any("Ã" in str(l) for l in meta.column_labels): raise Exception()
-            except:
-                # Fallback Latin-1 solicitado
-                df, meta = pyreadstat.read_sav(io.BytesIO(raw_bytes), encoding="latin-1")
-            
-            df = clean_dataframe(df)
-            var_labels = dict(zip(df.columns, meta.column_labels))
-            val_labels = meta.variable_value_labels
+        if data_file.name.endswith('.xlsx'):
+            df = pd.read_excel(data_file)
+        else:
+            # Los .dat de LimeSurvey suelen ser CSV con coma o tabulación
+            df = pd.read_csv(data_file, sep=None, engine='python')
+        
+        # 2. Aplicar compatibilización (Diagonal por Guion Bajo)
+        df = compatibilize_data(df)
+        
+        var_labels, val_labels = {}, {}
+        
+        # 3. Procesar Sintaxis si existe
+        if sps_file:
+            var_labels, val_labels = parse_sps_syntax(sps_file.read())
+            st.sidebar.success(f"✅ Sintaxis vinculada: {len(var_labels)} variables.")
 
-        # --- 2. PROCESAR SINTAXIS (.SPS) ---
-        if uploaded_sps:
-            sps_var_labels, sps_val_labels = parse_sps_syntax(uploaded_sps.read())
-            var_labels.update(sps_var_labels)
-            val_labels.update(sps_val_labels)
-            st.sidebar.success("✅ Sintaxis SPS cargada correctamente")
+        # --- VISTA ESTILO JAMOVI ---
+        tab1, tab2 = st.tabs(["📋 Hoja de Datos", "🔍 Vista de Variables"])
 
-        # --- 3. VISTA JAMOVI (Pestañas) ---
-        tab_data, tab_vars = st.tabs(["📋 Hoja de Datos", "🔍 Vista de Variables"])
-
-        with tab_data:
-            # Crear copia visual con etiquetas aplicadas (1 -> Sí)
+        with tab1:
+            st.subheader("Datos Editables")
+            # Copia visual con etiquetas de valor (Ej: 1 -> Hombre)
             df_visual = df.copy()
             for col, mapping in val_labels.items():
                 if col in df_visual.columns:
-                    df_visual[col] = df_visual[col].map(mapping).fillna(df_visual[col])
+                    # Intentamos mapear, si no es numérico lo dejamos igual
+                    try:
+                        df_visual[col] = df_visual[col].map(mapping).fillna(df_visual[col])
+                    except:
+                        pass
             
-            st.subheader("Editor de Datos")
-            # Usando width="stretch" para evitar avisos de deprecación
-            edited_df = st.data_editor(df_visual, width="stretch", num_rows="dynamic")
+            # st.data_editor permite editar celdas como en una app de escritorio
+            edited_df = st.data_editor(df_visual, width="stretch")
 
-        with tab_vars:
+        with tab2:
             st.subheader("Diccionario de Metadatos")
-            var_info = {
-                "Variable": df.columns,
-                "Etiqueta (Label)": [var_labels.get(c, "Sin etiqueta") for c in df.columns],
-                "Diccionario de Valores": ["✅ Sí" if c in val_labels else "❌ No" for c in df.columns]
-            }
-            st.dataframe(pd.DataFrame(var_info), width="stretch")
+            meta_summary = []
+            for col in df.columns:
+                meta_summary.append({
+                    "Variable": col,
+                    "Etiqueta": var_labels.get(col, "Sin etiqueta en SPS"),
+                    "Diccionario": "✅ Sí" if col in val_labels else "❌ No"
+                })
+            st.dataframe(pd.DataFrame(meta_summary), width="stretch")
 
-        # --- 4. EXPORTACIÓN ---
+        # --- EXPORTACIÓN ---
         st.markdown("---")
-        if st.button("🚀 Generar y Descargar archivo SPSS (.sav)"):
-            output_path = "resultado_final.sav"
+        if st.button("🚀 Exportar a SAV Profesional"):
+            output = "archivo_final_etiquetado.sav"
             
-            # Reconstruimos la lista de etiquetas para pyreadstat
+            # Preparar lista de etiquetas en orden
             labels_list = [var_labels.get(c, "") for c in df.columns]
             
+            # Guardamos el archivo .sav real (con números + diccionario)
+            # Esto es lo que lee SPSS, Jamovi, R o Stata.
             pyreadstat.write_sav(
-                df, # Guardamos el original (numérico)
-                output_path,
-                column_labels=labels_list,
+                df, 
+                output, 
+                column_labels=labels_list, 
                 variable_value_labels=val_labels
             )
             
-            with open(output_path, "rb") as f:
-                st.download_button("⬇️ Descargar SAV Etiquetado", f, file_name="spss_fix_final.sav")
+            with open(output, "rb") as f:
+                st.download_button("⬇️ Descargar SAV para IBM SPSS / Jamovi", f, file_name="datos_finales.sav")
 
     except Exception as e:
-        st.error(f"Error al procesar los archivos: {e}")
-        st.info("Asegúrate de que las columnas del archivo de datos coincidan con los nombres en el archivo .sps")
-
+        st.error(f"Error al procesar: {e}")
 else:
-    # Pantalla de bienvenida
-    st.warning("⚠️ Esperando carga de archivos...")
-    st.markdown("""
-    ### Cómo usar esta herramienta:
-    1. **Selecciona el origen** en la izquierda (Kobo, LimeSurvey o SAV).
-    2. **Sube el archivo de datos** (Excel o DAT).
-    3. **Sube el archivo .sps** (La sintaxis que contiene las etiquetas).
-    4. **Revisa y edita** en la tabla central.
-    5. **Descarga** tu archivo .sav listo para cualquier software estadístico.
-    """)
+    st.info("Por favor, sube el archivo de datos para comenzar.")
