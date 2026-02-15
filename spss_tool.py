@@ -4,6 +4,8 @@ import pyreadstat
 import io
 import os
 
+import json
+
 # Configuración de la página para dispositivos móviles y escritorio
 st.set_page_config(
     page_title="SPSS Web Tool Manager",
@@ -12,7 +14,7 @@ st.set_page_config(
     initial_sidebar_state="collapsed"
 )
 
-def main():
+def tool_manager_exporter():
     # Inicializar session_state para persistir datos entre reruns
     if 'df' not in st.session_state:
         st.session_state.df = None
@@ -489,6 +491,220 @@ def main():
                 os.remove(input_path)
             if os.path.exists("cleaned_data.sav"):
                 os.remove("cleaned_data.sav")
+
+# --- TOOL ADVANCED EDITOR ---
+
+def load_sav_file(uploaded_file):
+    """Carga el archivo .sav y extrae datos y metadatos."""
+    try:
+        with open("temp_upload.sav", "wb") as f:
+            f.write(uploaded_file.getbuffer())
+        
+        df, meta = pyreadstat.read_sav("temp_upload.sav")
+        
+        if os.path.exists("temp_upload.sav"):
+            os.remove("temp_upload.sav")
+            
+        return df, meta
+    except Exception as e:
+        st.error(f"Error al leer el archivo: {e}")
+        return None, None
+
+def save_to_sav(df, col_labels, val_labels):
+    """Guarda el dataframe editado de nuevo a formato .sav usando los diccionarios de etiquetas."""
+    buffer = io.BytesIO()
+    temp_filename = "temp_export.sav"
+    
+    try:
+        # pyreadstat necesita que los keys de val_labels sean los nombres de las columnas
+        pyreadstat.write_sav(
+            df, 
+            temp_filename, 
+            column_labels=col_labels,
+            variable_value_labels=val_labels
+        )
+        
+        with open(temp_filename, "rb") as f:
+            buffer.write(f.read())
+            
+        if os.path.exists(temp_filename):
+            os.remove(temp_filename)
+            
+        return buffer.getvalue()
+    except Exception as e:
+        st.error(f"Error al generar el .sav: {e}")
+        return None
+
+def tool_advanced_editor():
+    # --- GESTIÓN DEL ESTADO ---
+
+    if 'data_df' not in st.session_state:
+        st.session_state['data_df'] = pd.DataFrame()
+    if 'column_labels' not in st.session_state:
+        st.session_state['column_labels'] = {}
+    if 'value_labels' not in st.session_state:
+        st.session_state['value_labels'] = {}
+    if 'editor_file_name' not in st.session_state:
+        st.session_state['editor_file_name'] = ""
+
+    st.title("📊 Editor de Archivos IBM SPSS (.sav)")
+    st.markdown("""
+    Herramienta avanzada para editar datos y metadatos de archivos SPSS.
+    **Ahora puedes editar las etiquetas de las variables y los valores.**
+    """)
+
+    # --- INTERFAZ PRINCIPAL ---
+
+    uploaded_file = st.sidebar.file_uploader("Cargar archivo .sav (Editor)", type=["sav"], key="editor_uploader")
+
+    # Carga inicial
+    if uploaded_file is not None:
+        if st.session_state.get('editor_file_name') != uploaded_file.name:
+            df, meta = load_sav_file(uploaded_file)
+            if df is not None:
+                st.session_state['data_df'] = df
+                st.session_state['column_labels'] = meta.column_names_to_labels if meta else {}
+                st.session_state['value_labels'] = meta.variable_value_labels if meta else {}
+                st.session_state['editor_file_name'] = uploaded_file.name
+                st.success(f"Archivo cargado correctamente.")
+
+    if not st.session_state['data_df'].empty:
+        
+        # PESTAÑAS PRINCIPALES
+        tab_data, tab_vars, tab_export = st.tabs(["📝 Vista de Datos", "🏷️ Vista de Variables (Metadatos)", "💾 Exportar"])
+
+        # --- 1. VISTA DE DATOS ---
+        with tab_data:
+            st.caption("Edita los valores de las celdas o agrega filas nuevas.")
+            
+            # Editor de datos principal
+            edited_df = st.data_editor(
+                st.session_state['data_df'],
+                num_rows="dynamic",
+                key="data_editor",
+                use_container_width=True
+            )
+            
+            # Sincronizar cambios en datos
+            if not st.session_state['data_df'].equals(edited_df):
+                st.session_state['data_df'] = edited_df
+
+        # --- 2. VISTA DE VARIABLES (NUEVO) ---
+        with tab_vars:
+            st.caption("Edita las etiquetas y los valores de las variables. Usa formato JSON para valores (ej: {'1':'Hombre'}).")
+            
+            # Preparar DataFrame de Metadatos para el editor
+            current_columns = st.session_state['data_df'].columns.tolist()
+            meta_rows = []
+            
+            for col in current_columns:
+                # Obtener etiqueta actual
+                lbl = st.session_state['column_labels'].get(col, "")
+                # Obtener value labels actuales y convertir a string JSON para editar
+                val_lbls_dict = st.session_state['value_labels'].get(col, {})
+                val_lbls_str = json.dumps(val_lbls_dict) if val_lbls_dict else ""
+                
+                meta_rows.append({
+                    "Nombre Variable": col,
+                    "Etiqueta (Label)": lbl,
+                    "Etiquetas de Valor (JSON)": val_lbls_str
+                })
+            
+            meta_df = pd.DataFrame(meta_rows)
+
+            # Editor de Variables
+            edited_meta_df = st.data_editor(
+                meta_df,
+                key="meta_editor",
+                use_container_width=True,
+                column_config={
+                    "Nombre Variable": st.column_config.TextColumn(disabled=True), # Renombrar es complejo, mejor bloquear
+                    "Etiquetas de Valor (JSON)": st.column_config.TextColumn(help="Formato: {\"1\": \"Texto\", \"2\": \"Otro\"}")
+                }
+            )
+
+            # Botón para añadir variable nueva
+            col_add, col_dummy = st.columns([1, 4])
+            with col_add:
+                new_var_name = st.text_input("Nombre nueva variable", value="NUEVA_VAR")
+                if st.button("➕ Agregar Variable"):
+                    if new_var_name not in st.session_state['data_df'].columns:
+                        st.session_state['data_df'][new_var_name] = 0 # Valor por defecto
+                        st.rerun()
+                    else:
+                        st.warning("Esa variable ya existe.")
+
+            # Lógica para guardar cambios de metadatos al Estado
+            # Comparamos si hubo cambios en la tabla de metadatos
+            if not meta_df.equals(edited_meta_df):
+                new_col_labels = {}
+                new_val_labels = {}
+                
+                for index, row in edited_meta_df.iterrows():
+                    var_name = row["Nombre Variable"]
+                    # Actualizar Variable Label
+                    if row["Etiqueta (Label)"]:
+                        new_col_labels[var_name] = row["Etiqueta (Label)"]
+                    
+                    # Actualizar Value Labels (Parsear JSON)
+                    json_str = row["Etiquetas de Valor (JSON)"]
+                    if json_str and json_str.strip() != "":
+                        try:
+                            # Intentar limpiar comillas inteligentes si el usuario copió/pegó
+                            json_clean = json_str.replace("'", '"')
+                            parsed_dict = json.loads(json_clean)
+                            # Asegurar que las claves sean strings o números según corresponda
+                            # pyreadstat suele preferir claves float para columnas numéricas, pero string funciona a veces
+                            new_val_labels[var_name] = parsed_dict
+                        except json.JSONDecodeError:
+                            st.warning(f"Error en JSON para variable {var_name}. Se ignoraron los cambios.")
+                
+                st.session_state['column_labels'] = new_col_labels
+                st.session_state['value_labels'] = new_val_labels
+                # No hacemos rerun forzado para no molestar, se actualizará en la próxima acción
+
+        # --- 3. EXPORTAR ---
+        with tab_export:
+            st.subheader("Descargar Resultados")
+            
+            if st.button("Preparar archivo .SAV final"):
+                sav_data = save_to_sav(
+                    st.session_state['data_df'],
+                    st.session_state['column_labels'],
+                    st.session_state['value_labels']
+                )
+                
+                if sav_data:
+                    st.success("Archivo generado con éxito.")
+                    st.download_button(
+                        label="⬇️ Descargar .SAV",
+                        data=sav_data,
+                        file_name=f"modificado_{st.session_state.get('editor_file_name', 'data.sav')}",
+                        mime="application/x-spss-sav"
+                    )
+
+    else:
+        st.info("Sube un archivo .sav para comenzar o genera uno de prueba.")
+        if st.button("Generar Prueba"):
+            # Generar datos dummy para probar sin archivo
+            dummy = pd.DataFrame({'Q1': [1,2,1], 'Q2': [5,4,3]})
+            st.session_state['data_df'] = dummy
+            st.session_state['column_labels'] = {'Q1': 'Pregunta Género', 'Q2': 'Satisfacción'}
+            st.session_state['value_labels'] = {'Q1': {1:'M', 2:'F'}}
+            st.session_state['editor_file_name'] = "prueba.sav"
+            st.rerun()
+
+def main():
+    st.sidebar.title("Navegación")
+    tool_select = st.sidebar.radio(
+        "Selecciona la Herramienta:",
+        ["Gestor y Exportador (Clásico)", "Editor Avanzado (Nuevo)"]
+    )
+    
+    if tool_select == "Gestor y Exportador (Clásico)":
+        tool_manager_exporter()
+    else:
+        tool_advanced_editor()
 
 if __name__ == "__main__":
     main()
