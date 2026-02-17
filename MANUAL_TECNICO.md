@@ -61,6 +61,15 @@ Módulo de auditoría de calidad.
     *   Normaliza tipos (int vs float) para comparaciones robustas.
     *   Itera sobre valores únicos (`unique()`) para optimizar rendimiento.
 
+### D. `tool_visualizer()` (Data Storytelling)
+Módulo de visualización y narrativa.
+*   **Dependencia**: `plotly` (Express y Graph Objects).
+*   **Lógica de Negocio**:
+    *   **Auto-Binning**: Crea rangos de edad (`pd.cut`) automáticamente si se selecciona una variable numérica (`16-29`, `30-49`, `50+`).
+    *   **Control de Cuotas**: Genera tablas cruzadas (`pd.crosstab`) de 3 dimensiones (Zona, Sexo, Edad) aplanadas para fácil lectura.
+    *   **Componentes UI**: Usa `st.tabs` para organizar la narrativa (Quota -> Demo -> Voto -> Cruces).
+    *   **Manejo de Errores**: Bloques `try/except` individuales por gráfico para evitar que un error de datos rompa todo el dashboard.
+
 ---
 
 ## 4. Gestión de Estado (Session State)
@@ -79,6 +88,7 @@ La persistencia de datos entre recargas de la página (reruns) es crítica en St
 ```bash
 pip install -r requirements.txt
 ```
+*Nota: Se agregó `plotly` a las dependencias.*
 
 ### Ejecución
 ```bash

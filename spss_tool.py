@@ -3,6 +3,8 @@ import pandas as pd
 import pyreadstat
 import io
 import os
+import plotly.express as px
+import plotly.graph_objects as go
 
 import json
 
@@ -89,7 +91,7 @@ def tool_manager_exporter():
             # --- PESTAÑA: VISTA PREVIA ---
             with tab_preview:
                 st.subheader("Vista rápida de los datos")
-                st.dataframe(df.head(20), use_container_width=True)
+                st.dataframe(df.head(20), width="stretch")
 
             # --- PESTAÑA: VER ESTRUCTURA ---
             with tab_structure:
@@ -162,7 +164,7 @@ def tool_manager_exporter():
                 # Mostrar tabla con formato
                 st.dataframe(
                     structure_df,
-                    use_container_width=True,
+                    width="stretch",
                     height=400,
                     column_config={
                         "Variable": st.column_config.TextColumn("Variable", width="small"),
@@ -205,12 +207,12 @@ def tool_manager_exporter():
                     all_cols = df.columns.tolist()
                     
                     with btn_col1:
-                        if st.button("✅ Todas", use_container_width=True, key="select_all_edit"):
+                        if st.button("✅ Todas", width="stretch", key="select_all_edit"):
                             st.session_state.selected_cols = all_cols
                             st.rerun()
                     
                     with btn_col2:
-                        if st.button("❌ Ninguna", use_container_width=True, key="deselect_all_edit"):
+                        if st.button("❌ Ninguna", width="stretch", key="deselect_all_edit"):
                             st.session_state.selected_cols = []
                             st.rerun()
                     
@@ -265,7 +267,7 @@ def tool_manager_exporter():
                             if len(st.session_state.selected_cols) > max_display:
                                 st.info(f"ℹ️ Mostrando {max_display} de {len(st.session_state.selected_cols)}. Usa el buscador para encontrar más.")
                             
-                            submitted = st.form_submit_button("💾 Guardar Etiquetas", use_container_width=True)
+                            submitted = st.form_submit_button("💾 Guardar Etiquetas", width="stretch")
                             if submitted:
                                 st.session_state.modified_labels.update(temp_labels)
                                 st.toast("✅ Etiquetas actualizadas")
@@ -350,7 +352,7 @@ def tool_manager_exporter():
                     
                     # Vista previa
                     st.markdown("### Vista Previa del Libro de Códigos")
-                    st.dataframe(codebook_df, use_container_width=True, height=300)
+                    st.dataframe(codebook_df, width="stretch", height=300)
                     
                     # Estadísticas del libro de códigos
                     st.divider()
@@ -387,7 +389,7 @@ def tool_manager_exporter():
                         data=output_codebook.getvalue(),
                         file_name="libro_codigos.xlsx",
                         mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-                        use_container_width=True,
+                        width="stretch",
                         help="Descarga el libro de códigos con tipos de pregunta y etiquetas"
                     )
 
@@ -432,7 +434,7 @@ def tool_manager_exporter():
                     data=output_xlsx.getvalue(),
                     file_name=excel_filename,
                     mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-                    use_container_width=True
+                    width="stretch"
                 )
 
                 st.subheader("SPSS (.sav)")
@@ -455,13 +457,13 @@ def tool_manager_exporter():
                             data=f,
                             file_name=sav_filename,
                             mime="application/octet-stream",
-                            use_container_width=True
+                            width="stretch"
                         )
                 except Exception as e:
                     st.error(f"Error al generar SPSS: {e}")
 
                 st.divider()
-                if st.button("🔄 Cargar Nuevo Archivo", use_container_width=True):
+                if st.button("🔄 Cargar Nuevo Archivo", width="stretch"):
                     st.session_state.file_loaded = False
                     st.session_state.df = None
                     st.session_state.meta = None
@@ -573,9 +575,9 @@ def tool_advanced_editor():
             
             with b1:
                 # Popover para agregar variable
-                with st.popover("➕ Nueva", use_container_width=True):
+                with st.popover("➕ Nueva", width="stretch"):
                     new_var_name = st.text_input("Nombre Variable", value="NUEVA_VAR")
-                    if st.button("Crear", use_container_width=True):
+                    if st.button("Crear", width="stretch"):
                         if new_var_name not in st.session_state['data_df'].columns:
                             st.session_state['data_df'][new_var_name] = 0 # Valor por defecto
                             st.toast(f"Variable {new_var_name} creada!")
@@ -585,7 +587,7 @@ def tool_advanced_editor():
 
             with b2:
                 # Popover para borrar variables
-                with st.popover("🗑️ Borrar", use_container_width=True):
+                with st.popover("🗑️ Borrar", width="stretch"):
                     st.markdown("### Eliminar Columnas")
                     vars_to_delete = st.multiselect(
                         "Selecciona variables a borrar:",
@@ -593,7 +595,7 @@ def tool_advanced_editor():
                         key="delete_multiselect"
                     )
                     
-                    if st.button("🚨 Eliminar Seleccionadas", type="primary", use_container_width=True):
+                    if st.button("🚨 Eliminar Seleccionadas", type="primary", width="stretch"):
                         if vars_to_delete:
                             # 1. Eliminar del DataFrame
                             st.session_state['data_df'].drop(columns=vars_to_delete, inplace=True)
@@ -621,11 +623,11 @@ def tool_advanced_editor():
                         data=sav_data,
                         file_name=f"modificado_{st.session_state.get('editor_file_name', 'data.sav')}",
                         mime="application/x-spss-sav",
-                        use_container_width=True
+                        width="stretch"
                     )
             
             with b4:
-                 if st.button("🔄 Reiniciar", use_container_width=True):
+                 if st.button("🔄 Reiniciar", width="stretch"):
                     st.session_state['data_df'] = pd.DataFrame()
                     st.session_state['column_labels'] = {}
                     st.session_state['value_labels'] = {}
@@ -644,7 +646,7 @@ def tool_advanced_editor():
                 st.session_state['data_df'],
                 num_rows="dynamic",
                 key="data_editor",
-                use_container_width=True,
+                width="stretch",
                 height=500
             )
             
@@ -679,7 +681,7 @@ def tool_advanced_editor():
             edited_meta_df = st.data_editor(
                 meta_df,
                 key="meta_editor",
-                use_container_width=True,
+                width="stretch",
                 height=500,
                 column_config={
                     "Nombre Variable": st.column_config.TextColumn(disabled=True), # Renombrar es complejo, mejor bloquear
@@ -767,7 +769,7 @@ def tool_audit_validator():
             return
 
         # 3. EXECUTE AUDIT
-        if st.button("🚀 Ejecutar Validación Completa", type="primary", use_container_width=True):
+        if st.button("🚀 Ejecutar Validación Completa", type="primary", width="stretch"):
             
             with st.status("Ejecutando auditoría...", expanded=True) as status:
                 st.write("🔍 Iniciando validación estructural...")
@@ -907,7 +909,7 @@ def tool_audit_validator():
                 
                 st.dataframe(
                     show_df, 
-                    use_container_width=True, 
+                    width="stretch", 
                     column_config={
                         "Criticidad": st.column_config.TextColumn(
                             "Severidad",
@@ -944,15 +946,182 @@ def tool_audit_validator():
                     data=report_buffer.getvalue(),
                     file_name="Reporte_Auditoria_Calidad.xlsx",
                     mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-                    use_container_width=True
+                    width="stretch"
                 )
+
+
+# --- TOOL DATA STORYTELLING ---
+
+def tool_visualizer():
+    st.title("📊 Data Storytelling (Beta)")
+    st.markdown("""
+    **Narrativa de Datos Automatizada**: Asigna roles a tus variables y obtén un dashboard profesional al instante.
+    """)
+
+    # 1. DATA CHECK
+    if st.session_state.df is None:
+        st.warning("⚠️ Primero carga un archivo en el 'Gestor y Exportador' o 'Editor Avanzado'.")
+        return
+
+    df = st.session_state.df.copy()
+    
+    # 2. ROLE MAPPING (SIDEBAR)
+    with st.sidebar:
+        st.header("🎯 Mapeo de Variables")
+        st.info("Define qué representa cada columna:")
+        
+        cols = df.columns.tolist()
+        
+        var_genero = st.selectbox("Género (Sex)", ["-- Seleccionar --"] + cols, index=0)
+        var_edad = st.selectbox("Edad (Numérica)", ["-- Seleccionar --"] + cols, index=0)
+        var_zona = st.selectbox("Zona / Localidad", ["-- Seleccionar --"] + cols, index=0)
+        
+        st.divider()
+        st.write("Variables de Interés")
+        vars_voto = st.multiselect("Intención de Voto / Imagen", cols)
+        
+        run_viz = st.button("✨ Generar Historia", type="primary")
+
+    # 3. DASHBOARD GENERATION
+    if run_viz:
+        
+        # PRE-PROCESSING: AGE RANGES
+        if var_edad != "-- Seleccionar --" and pd.api.types.is_numeric_dtype(df[var_edad]):
+            # Create Age Bins: 16-29, 30-49, 50+
+            bins = [0, 29, 49, 150]
+            labels = ['16-29 Joven', '30-49 Adulto', '50+ Senior']
+            df['Rango_Edad_Gen'] = pd.cut(df[var_edad], bins=bins, labels=labels)
+        else:
+            df['Rango_Edad_Gen'] = "No Definido"
+
+        # TABS
+        tab_quota, tab_demo, tab_vote, tab_cross = st.tabs([
+            "📋 Control de Muestra", 
+            "👥 Demográficos", 
+            "🗳️ Escenarios", 
+            "🔄 Cruces"
+        ])
+
+        # A. CONTROL DE MUESTRA (QUOTA)
+        with tab_quota:
+            st.subheader("Tabla de Control de Cuotas")
+            st.markdown("Frecuencias cruzadas para verificar el cumplimiento del diseño muestral.")
+            
+            if var_zona != "-- Seleccionar --" and var_edad != "-- Seleccionar --":
+                try:
+                    # Cross tabulation: Zone + Sex vs Age Range
+                    quota_table = pd.crosstab(
+                        index=[df[var_zona], df[var_genero]], 
+                        columns=df['Rango_Edad_Gen'],
+                        margins=True,
+                        margins_name="Total"
+                    )
+                    
+                    # Fix for Streamlit/Arrow serialization error with mixed types in index/columns due to "Total"
+                    # We reset index to make it a standard dataframe and ensure all column names are strings
+                    quota_display = quota_table.reset_index()
+                    quota_display.columns = [str(c) for c in quota_display.columns]
+                    
+                    st.dataframe(quota_display, width="stretch")
+                    
+                    # Download
+                    csv_quota = quota_table.to_csv().encode('utf-8')
+                    st.download_button("📥 Descargar Tabla Cuotas", csv_quota, "cuotas_control.csv", "text/csv")
+                except Exception as e:
+                    st.error(f"No se pudo generar la tabla de cuotas: {e}")
+            else:
+                st.info("Selecciona 'Zona' y 'Edad' para ver la tabla de control.")
+
+        # B. DEMOGRAPHICS
+        with tab_demo:
+            col1, col2 = st.columns(2)
+            
+            with col1:
+                st.markdown("### Género")
+                if var_genero != "-- Seleccionar --":
+                    fig_gen = px.pie(df, names=var_genero, title="Distribución por Género", hole=0.4)
+                    st.plotly_chart(fig_gen, use_container_width=True)
+                else:
+                    st.warning("Selecciona variable de Género.")
+            
+            with col2:
+                st.markdown("### Edad")
+                if var_edad != "-- Seleccionar --" and 'Rango_Edad_Gen' in df:
+                     fig_age = px.histogram(df, x='Rango_Edad_Gen', title="Distribución por Rango Etario", color='Rango_Edad_Gen')
+                     st.plotly_chart(fig_age, use_container_width=True)
+                else:
+                    st.warning("Selecciona variable de Edad.")
+
+        # C. ELECTORAL SCENARIOS
+        with tab_vote:
+            if vars_voto:
+                for v in vars_voto:
+                    st.divider()
+                    st.markdown(f"### {v}")
+                    
+                    try:
+                        # Frequency with percentages
+                        val_counts = df[v].value_counts(normalize=True).reset_index()
+                        val_counts.columns = ['Opción', 'Porcentaje']
+                        val_counts['Porcentaje'] = val_counts['Porcentaje'] * 100
+                        
+                        fig_vote = px.bar(
+                            val_counts, 
+                            x='Opción', 
+                            y='Porcentaje', 
+                            text_auto='.1f',
+                            title=f"Resultados: {v}",
+                            color='Opción'
+                        )
+                        st.plotly_chart(fig_vote, use_container_width=True)
+                    except Exception as e:
+                        st.error(f"Error al graficar {v}: {e}")
+            else:
+                st.info("Selecciona variables de 'Intención de Voto' en el menú lateral.")
+
+        # D. CROSSINGS (BIVARIATE)
+        with tab_cross:
+            if vars_voto and var_genero != "-- Seleccionar --":
+                st.subheader("Intención de Voto por Segmentos")
+                
+                options = [var_genero]
+                if var_zona != "-- Seleccionar --": options.append(var_zona)
+                if 'Rango_Edad_Gen' in df: options.append("Rango_Edad_Gen")
+
+                cross_var = st.selectbox("Cruzar por:", options)
+                
+                for v in vars_voto:
+                    st.markdown(f"#### {v} según {cross_var}")
+                    
+                    try:
+                        # Crosstab for plotting
+                        cross_data = pd.crosstab(df[cross_var], df[v], normalize='index') * 100
+                        cross_data = cross_data.reset_index().melt(id_vars=cross_var, var_name="Candidato", value_name="Porcentaje")
+                        
+                        fig_cross = px.bar(
+                            cross_data,
+                            x=cross_var,
+                            y="Porcentaje",
+                            color="Candidato",
+                            title=f"{v} por {cross_var}",
+                            barmode="group",
+                            text_auto='.1f'
+                        )
+                        st.plotly_chart(fig_cross, use_container_width=True)
+                    except Exception as e:
+                        st.warning(f"No se pudo cruzar {v}: {e}")
+            else:
+                 st.info("Requiere variables de Voto y Género definidos.")
+
+    elif not run_viz:
+        st.info("👈 Configura las variables en el menú lateral y presiona 'Generar Historia'.")
 
 
 def main():
     st.sidebar.title("Navegación")
     tool_select = st.sidebar.radio(
         "Selecciona la Herramienta:",
-        ["Gestor y Exportador (Clásico)", "Editor Avanzado (Nuevo)", "Auditoría de Calidad (Beta)"]
+        ["Gestor y Exportador (Clásico)", "Editor Avanzado (Nuevo)", "Auditoría de Calidad (Beta)", "Data Storytelling (Beta)"]
     )
     
     if tool_select == "Gestor y Exportador (Clásico)":
@@ -961,6 +1130,8 @@ def main():
         tool_advanced_editor()
     elif tool_select == "Auditoría de Calidad (Beta)":
         tool_audit_validator()
+    elif tool_select == "Data Storytelling (Beta)":
+        tool_visualizer()
 
 if __name__ == "__main__":
     main()

@@ -1,4 +1,4 @@
-# 📘 Manual de Usuario: SPSS Web Tool Manager
+5# 📘 Manual de Usuario: SPSS Web Tool Manager
 
 Bienvenido al **SPSS Web Tool Manager**, una herramienta integral diseñada para gestionar, editar y auditar archivos de datos SPSS (`.sav`) directamente desde tu navegador, sin necesidad de licencias de software propietario.
 
@@ -88,3 +88,23 @@ Requieres dos archivos:
     *   `AUDIT_LOG`: Lista exacta de errores y dónde encontrarlos.
     *   `DATA`: Tus datos originales para referencia.
     *   `METADATA_REF`: El diccionario del patrón para comparar.
+
+---
+
+## 4. Data Storytelling (Beta) 📈
+
+Convierte tus datos en narrativa visual de forma automática. Ideal para presentaciones rápidas de encuestas.
+
+### 🎯 Mapeo de Variables
+Al ingresar, debes asignar qué columna de tu archivo cumple cada rol semántico:
+*   **Género**: Variable categórica (Hombre/Mujer).
+*   **Edad**: Variable numérica (la herramienta creará rangos automáticamente).
+*   **Zona**: Variable geográfica para control de cuotas.
+*   **Variables de Interés**: Las preguntas de intención de voto o imagen que quieres graficar.
+
+### 🧩 Pestañas de Análisis
+1.  **Control de Muestra**: Tabla cruzada (Zona x Género x Rango Edad) para verificar si cumples con las cuotas del diseño muestral. Exportable a CSV.
+2.  **Demográficos**: Gráficos pre-diseñados de distribución de género y edad.
+3.  **Escenarios**: Gráficos de barras para cada variable de voto seleccionada, con porcentajes calculados automáticamente.
+4.  **Cruces**: La función más potente. Elige una variable de corte (ej: Género) y mira cómo votan los distintos segmentos (Hombres vs Mujeres).
+
