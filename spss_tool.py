@@ -391,43 +391,25 @@ def tool_manager_exporter():
                         help="Descarga el libro de códigos con tipos de pregunta y etiquetas"
                     )
 
-            # --- SECCIÓN DE EXPORTACIÓN ---
-            st.divider()
-            st.subheader("💾 Exportar y Descargar")
-            
-            # Preparar dataframe filtrado
-            df_filtered = df[st.session_state.selected_cols] if st.session_state.selected_cols else df
-            
-            # Campo para nombre de archivo
-            st.markdown("### 📝 Nombre del Archivo")
-            col_name1, col_name2 = st.columns(2)
-            
-            with col_name1:
+            # --- SECCIÓN DE EXPORTACIÓN (AHORA EN SIDEBAR) ---
+            with st.sidebar:
+                st.divider()
+                st.header("💾 Exportar Datos")
+                
+                # Preparar dataframe filtrado
+                df_filtered = df[st.session_state.selected_cols] if st.session_state.selected_cols else df
+                
+                # Campo para nombre de archivo
                 filename_base = st.text_input(
-                    "Nombre base del archivo:",
+                    "Nombre del archivo (sin extensión):",
                     value="encuesta_exportada",
-                    help="Nombre sin extensión (se agregará .xlsx o .sav automáticamente)",
                     key="filename_input"
                 )
-            
-            with col_name2:
-                st.markdown("&nbsp;")  # Espaciador
-                if st.button("🔄 Cargar Nuevo Archivo", use_container_width=True):
-                    st.session_state.file_loaded = False
-                    st.session_state.df = None
-                    st.session_state.meta = None
-                    st.session_state.selected_cols = []
-                    st.session_state.modified_labels = {}
-                    st.rerun()
-            
-            st.divider()
-            exp1, exp2 = st.columns(2)
 
-            with exp1:
-                st.write("**📊 Formato Excel**")
+                st.subheader("Excel")
                 # Opción para simplificar el encabezado de Excel
                 excel_header = st.radio(
-                    "Encabezados:",
+                    "Encabezados Excel:",
                     ["Nombres cortos", "Etiquetas largas"],
                     index=0,
                     key="excel_header_radio"
@@ -450,43 +432,48 @@ def tool_manager_exporter():
                     data=output_xlsx.getvalue(),
                     file_name=excel_filename,
                     mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-                    use_container_width=True,
-                    help=f"Descarga: {excel_filename}"
+                    use_container_width=True
                 )
 
-            with exp2:
-                st.write("**📊 Formato SPSS**")
-                st.markdown("&nbsp;")  # Espaciador para alinear con el radio button
-                st.markdown("&nbsp;")
-                
+                st.subheader("SPSS (.sav)")
                 output_sav_path = "cleaned_data.sav"
                 
                 # Escribimos el nuevo SAV manteniendo etiquetas de valor y nuevas etiquetas de variable
-                pyreadstat.write_sav(
-                    df_filtered, 
-                    output_sav_path, 
-                    column_labels=st.session_state.modified_labels,
-                    variable_value_labels=meta.variable_value_labels
-                )
-                
-                # Generar nombre de archivo con extensión
-                sav_filename = f"{filename_base}.sav" if filename_base else "encuesta_limpia.sav"
-                
-                with open(output_sav_path, "rb") as f:
-                    st.download_button(
-                        label="📥 Descargar SPSS",
-                        data=f,
-                        file_name=sav_filename,
-                        mime="application/octet-stream",
-                        use_container_width=True,
-                        help=f"Descarga: {sav_filename}"
+                try:
+                    pyreadstat.write_sav(
+                        df_filtered, 
+                        output_sav_path, 
+                        column_labels=st.session_state.modified_labels,
+                        variable_value_labels=meta.variable_value_labels
                     )
+                    
+                    sav_filename = f"{filename_base}.sav" if filename_base else "encuesta_limpia.sav"
+                    
+                    with open(output_sav_path, "rb") as f:
+                        st.download_button(
+                            label="📥 Descargar SPSS",
+                            data=f,
+                            file_name=sav_filename,
+                            mime="application/octet-stream",
+                            use_container_width=True
+                        )
+                except Exception as e:
+                    st.error(f"Error al generar SPSS: {e}")
+
+                st.divider()
+                if st.button("🔄 Cargar Nuevo Archivo", use_container_width=True):
+                    st.session_state.file_loaded = False
+                    st.session_state.df = None
+                    st.session_state.meta = None
+                    st.session_state.selected_cols = []
+                    st.session_state.modified_labels = {}
+                    st.rerun()
 
         except Exception as e:
             st.error(f"Hubo un problema al procesar el archivo: {str(e)}")
         
         finally:
-            # Limpieza de archivos temporales del servidor de Streamlit
+            # Limpieza de archivos temporales
             if os.path.exists(input_path):
                 os.remove(input_path)
             if os.path.exists("cleaned_data.sav"):
@@ -548,50 +535,126 @@ def tool_advanced_editor():
         st.session_state['editor_file_name'] = ""
 
     st.title("📊 Editor de Archivos IBM SPSS (.sav)")
-    st.markdown("""
-    Herramienta avanzada para editar datos y metadatos de archivos SPSS.
-    **Ahora puedes editar las etiquetas de las variables y los valores.**
-    """)
 
-    # --- INTERFAZ PRINCIPAL ---
-
-    uploaded_file = st.sidebar.file_uploader("Cargar archivo .sav (Editor)", type=["sav"], key="editor_uploader")
-
-    # Carga inicial
-    if uploaded_file is not None:
-        if st.session_state.get('editor_file_name') != uploaded_file.name:
-            df, meta = load_sav_file(uploaded_file)
-            if df is not None:
+    # --- CARGA INICIAL (BARRA LATERAL O CENTRAL SI ESTÁ VACÍO) ---
+    if st.session_state['data_df'].empty:
+        uploaded_file = st.file_uploader("Cargar archivo .sav para editar", type=["sav"], key="editor_uploader_main")
+        if uploaded_file is not None:
+             df, meta = load_sav_file(uploaded_file)
+             if df is not None:
                 st.session_state['data_df'] = df
                 st.session_state['column_labels'] = meta.column_names_to_labels if meta else {}
                 st.session_state['value_labels'] = meta.variable_value_labels if meta else {}
                 st.session_state['editor_file_name'] = uploaded_file.name
-                st.success(f"Archivo cargado correctamente.")
-
-    if not st.session_state['data_df'].empty:
+                st.rerun()
         
-        # PESTAÑAS PRINCIPALES
-        tab_data, tab_vars, tab_export = st.tabs(["📝 Vista de Datos", "🏷️ Vista de Variables (Metadatos)", "💾 Exportar"])
+        st.divider()
+        if st.button("Generar Prueba (Demo)"):
+            # Generar datos dummy para probar sin archivo
+            dummy = pd.DataFrame({'Q1': [1,2,1], 'Q2': [5,4,3]})
+            st.session_state['data_df'] = dummy
+            st.session_state['column_labels'] = {'Q1': 'Pregunta Género', 'Q2': 'Satisfacción'}
+            st.session_state['value_labels'] = {'Q1': {1:'M', 2:'F'}}
+            st.session_state['editor_file_name'] = "prueba.sav"
+            st.rerun()
+
+    else:
+        # --- BARRA DE HERRAMIENTAS (TOOLBAR) ---
+        # Contenedor superior para acciones comunes
+        
+        col_info, col_actions = st.columns([2, 3])
+        
+        with col_info:
+            st.info(f"📂 Archivo: **{st.session_state['editor_file_name']}** | Filas: {len(st.session_state['data_df'])} | Cols: {len(st.session_state['data_df'].columns)}")
+
+        with col_actions:
+            # Usamos columnas dentro de la columna de acciones para los botones
+            b1, b2, b3, b4 = st.columns([1, 1, 1, 1])
+            
+            with b1:
+                # Popover para agregar variable
+                with st.popover("➕ Nueva", use_container_width=True):
+                    new_var_name = st.text_input("Nombre Variable", value="NUEVA_VAR")
+                    if st.button("Crear", use_container_width=True):
+                        if new_var_name not in st.session_state['data_df'].columns:
+                            st.session_state['data_df'][new_var_name] = 0 # Valor por defecto
+                            st.toast(f"Variable {new_var_name} creada!")
+                            st.rerun()
+                        else:
+                            st.error("Ya existe.")
+
+            with b2:
+                # Popover para borrar variables
+                with st.popover("🗑️ Borrar", use_container_width=True):
+                    st.markdown("### Eliminar Columnas")
+                    vars_to_delete = st.multiselect(
+                        "Selecciona variables a borrar:",
+                        options=st.session_state['data_df'].columns.tolist(),
+                        key="delete_multiselect"
+                    )
+                    
+                    if st.button("🚨 Eliminar Seleccionadas", type="primary", use_container_width=True):
+                        if vars_to_delete:
+                            # 1. Eliminar del DataFrame
+                            st.session_state['data_df'].drop(columns=vars_to_delete, inplace=True)
+                            
+                            # 2. Eliminar de metadatos
+                            for v in vars_to_delete:
+                                st.session_state['column_labels'].pop(v, None)
+                                st.session_state['value_labels'].pop(v, None)
+                            
+                            st.toast(f"Se eliminaron {len(vars_to_delete)} variables.")
+                            st.rerun()
+                        else:
+                            st.warning("Selecciona al menos una variable.")
+
+            with b3:
+                # Lógica de descarga directa en el botón
+                sav_data = save_to_sav(
+                    st.session_state['data_df'],
+                    st.session_state['column_labels'],
+                    st.session_state['value_labels']
+                )
+                if sav_data:
+                    st.download_button(
+                        label="💾 Guardar",
+                        data=sav_data,
+                        file_name=f"modificado_{st.session_state.get('editor_file_name', 'data.sav')}",
+                        mime="application/x-spss-sav",
+                        use_container_width=True
+                    )
+            
+            with b4:
+                 if st.button("🔄 Reiniciar", use_container_width=True):
+                    st.session_state['data_df'] = pd.DataFrame()
+                    st.session_state['column_labels'] = {}
+                    st.session_state['value_labels'] = {}
+                    st.session_state['editor_file_name'] = ""
+                    st.rerun()
+
+        st.divider()
+
+        # --- PESTAÑAS PRINCIPALES ---
+        tab_data, tab_vars = st.tabs(["📝 Vista de Datos", "🏷️ Vista de Variables"])
 
         # --- 1. VISTA DE DATOS ---
         with tab_data:
-            st.caption("Edita los valores de las celdas o agrega filas nuevas.")
-            
             # Editor de datos principal
             edited_df = st.data_editor(
                 st.session_state['data_df'],
                 num_rows="dynamic",
                 key="data_editor",
-                use_container_width=True
+                use_container_width=True,
+                height=500
             )
             
             # Sincronizar cambios en datos
             if not st.session_state['data_df'].equals(edited_df):
                 st.session_state['data_df'] = edited_df
 
-        # --- 2. VISTA DE VARIABLES (NUEVO) ---
+        # --- 2. VISTA DE VARIABLES ---
         with tab_vars:
-            st.caption("Edita las etiquetas y los valores de las variables. Usa formato JSON para valores (ej: {'1':'Hombre'}).")
+            st.markdown("##### Metadatos de Variables")
             
             # Preparar DataFrame de Metadatos para el editor
             current_columns = st.session_state['data_df'].columns.tolist()
@@ -617,22 +680,12 @@ def tool_advanced_editor():
                 meta_df,
                 key="meta_editor",
                 use_container_width=True,
+                height=500,
                 column_config={
                     "Nombre Variable": st.column_config.TextColumn(disabled=True), # Renombrar es complejo, mejor bloquear
                     "Etiquetas de Valor (JSON)": st.column_config.TextColumn(help="Formato: {\"1\": \"Texto\", \"2\": \"Otro\"}")
                 }
             )
-
-            # Botón para añadir variable nueva
-            col_add, col_dummy = st.columns([1, 4])
-            with col_add:
-                new_var_name = st.text_input("Nombre nueva variable", value="NUEVA_VAR")
-                if st.button("➕ Agregar Variable"):
-                    if new_var_name not in st.session_state['data_df'].columns:
-                        st.session_state['data_df'][new_var_name] = 0 # Valor por defecto
-                        st.rerun()
-                    else:
-                        st.warning("Esa variable ya existe.")
 
             # Lógica para guardar cambios de metadatos al Estado
             # Comparamos si hubo cambios en la tabla de metadatos
@@ -653,8 +706,6 @@ def tool_advanced_editor():
                             # Intentar limpiar comillas inteligentes si el usuario copió/pegó
                             json_clean = json_str.replace("'", '"')
                             parsed_dict = json.loads(json_clean)
-                            # Asegurar que las claves sean strings o números según corresponda
-                            # pyreadstat suele preferir claves float para columnas numéricas, pero string funciona a veces
                             new_val_labels[var_name] = parsed_dict
                         except json.JSONDecodeError:
                             st.warning(f"Error en JSON para variable {var_name}. Se ignoraron los cambios.")
@@ -663,48 +714,253 @@ def tool_advanced_editor():
                 st.session_state['value_labels'] = new_val_labels
                 # No hacemos rerun forzado para no molestar, se actualizará en la próxima acción
 
-        # --- 3. EXPORTAR ---
-        with tab_export:
-            st.subheader("Descargar Resultados")
-            
-            if st.button("Preparar archivo .SAV final"):
-                sav_data = save_to_sav(
-                    st.session_state['data_df'],
-                    st.session_state['column_labels'],
-                    st.session_state['value_labels']
-                )
-                
-                if sav_data:
-                    st.success("Archivo generado con éxito.")
-                    st.download_button(
-                        label="⬇️ Descargar .SAV",
-                        data=sav_data,
-                        file_name=f"modificado_{st.session_state.get('editor_file_name', 'data.sav')}",
-                        mime="application/x-spss-sav"
-                    )
+# --- TOOL AUDIT VALIDATOR ---
 
-    else:
-        st.info("Sube un archivo .sav para comenzar o genera uno de prueba.")
-        if st.button("Generar Prueba"):
-            # Generar datos dummy para probar sin archivo
-            dummy = pd.DataFrame({'Q1': [1,2,1], 'Q2': [5,4,3]})
-            st.session_state['data_df'] = dummy
-            st.session_state['column_labels'] = {'Q1': 'Pregunta Género', 'Q2': 'Satisfacción'}
-            st.session_state['value_labels'] = {'Q1': {1:'M', 2:'F'}}
-            st.session_state['editor_file_name'] = "prueba.sav"
-            st.rerun()
+def tool_audit_validator():
+    st.title("🛡️ Auditoría y Validación de Datos")
+    st.markdown("""
+    **Módulo de Calidad de Datos**: Valida archivos de campo (Excel/CSV) contra un diccionario de datos (SPSS .SAV).
+    """)
+
+    # --- SETUP LAYOUT ---
+    col_upload_ref, col_upload_target = st.columns(2)
+    
+    with col_upload_ref:
+        st.subheader("1. Patrón (SPSS .sav)")
+        ref_file = st.file_uploader("Cargar archivo maestro", type=["sav"], key="audit_ref")
+    
+    with col_upload_target:
+        st.subheader("2. Datos (Excel/CSV)")
+        target_file = st.file_uploader("Cargar datos a validar", type=["xlsx", "csv"], key="audit_target")
+
+    # --- LOGIC ---
+    if ref_file and target_file:
+        st.divider()
+        
+        # 1. LOAD REFERENCE
+        try:
+            with open("temp_ref.sav", "wb") as f:
+                f.write(ref_file.getbuffer())
+            df_ref, meta_ref = pyreadstat.read_sav("temp_ref.sav")
+            
+            # Clean up temp file immediately
+            if os.path.exists("temp_ref.sav"):
+                os.remove("temp_ref.sav")
+                
+            st.success(f"✅ Patrón cargado: **{len(df_ref.columns)}** variables definidos.")
+            
+        except Exception as e:
+            st.error(f"Error crítico al leer el patrón SAV: {e}")
+            return
+
+        # 2. LOAD TARGET
+        try:
+            if target_file.name.endswith('.xlsx'):
+                df_target = pd.read_excel(target_file)
+            else:
+                df_target = pd.read_csv(target_file)
+            
+            st.info(f"📂 Datos cargados: **{len(df_target)}** registros y **{len(df_target.columns)}** columnas.")
+            
+        except Exception as e:
+            st.error(f"Error crítico al leer el archivo de datos: {e}")
+            return
+
+        # 3. EXECUTE AUDIT
+        if st.button("🚀 Ejecutar Validación Completa", type="primary", use_container_width=True):
+            
+            with st.status("Ejecutando auditoría...", expanded=True) as status:
+                st.write("🔍 Iniciando validación estructural...")
+                audit_logs = []
+                
+                # --- A. STRUCTURE VALIDATION ---
+                ref_cols = set(df_ref.columns)
+                target_cols = set(df_target.columns)
+                
+                # Check 1: Missing Mandatory Columns
+                missing_cols = list(ref_cols - target_cols)
+                if missing_cols:
+                    for col in missing_cols:
+                        audit_logs.append({
+                            "Fila": "N/A",
+                            "Variable": col,
+                            "Valor Encontrado": "N/A",
+                            "Tipo de Error": "Estructura Missing",
+                            "Mensaje": "La variable es obligatoria según el patrón pero no existe en los datos.",
+                            "Criticidad": "ALTA"
+                        })
+                
+                # Check 2: Extra Columns (Warning)
+                extra_cols = list(target_cols - ref_cols)
+                if extra_cols:
+                    for col in extra_cols:
+                        audit_logs.append({
+                            "Fila": "N/A",
+                            "Variable": col,
+                            "Valor Encontrado": "N/A",
+                            "Tipo de Error": "Estructura Extra",
+                            "Mensaje": "Variable encontrada en datos pero no en el patrón.",
+                            "Criticidad": "BAJA"
+                        })
+
+                st.write("🧠 Analizando consistencia de datos y valores...")
+                
+                # --- B. DATA & VALUE VALIDATION ---
+                common_cols = list(ref_cols.intersection(target_cols))
+                progress_bar = st.progress(0)
+                
+                for idx, col in enumerate(common_cols):
+                    progress_bar.progress((idx + 1) / len(common_cols))
+                    
+                    # Get Ref Metadata
+                    is_numeric_ref = pd.api.types.is_numeric_dtype(df_ref[col])
+                    valid_range = meta_ref.variable_value_labels.get(col, {})
+                    
+                    # Analyze Target Column
+                    # We iterate unique values for performance, assuming categorical data usually has limited cardinality
+                    # For continuous data, simple type check is used
+                    
+                    # 1. Type Mismatch Check
+                    if is_numeric_ref:
+                        # Check if target has non-numeric values
+                        non_numeric = pd.to_numeric(df_target[col], errors='coerce').isna() & df_target[col].notna()
+                        if non_numeric.any():
+                            # Log first few examples
+                            bad_indices = df_target[non_numeric].index[:5]
+                            for bad_idx in bad_indices:
+                                val = df_target.at[bad_idx, col]
+                                audit_logs.append({
+                                    "Fila": bad_idx + 2, # Excel row index hint (1-based + header)
+                                    "Variable": col,
+                                    "Valor Encontrado": str(val),
+                                    "Tipo de Error": "Tipo de Dato",
+                                    "Mensaje": "Se esperaba numérico, se encontró texto/inválido.",
+                                    "Criticidad": "ALTA"
+                                })
+
+                    # 2. Value Label / Range Check
+                    if valid_range:
+                        valid_codes = set(valid_range.keys())
+                        valid_labels = set(valid_range.values())
+                        
+                        unique_vals = df_target[col].dropna().unique()
+                        
+                        for val in unique_vals:
+                            # Check if value matches a code (e.g. 1) or a label (e.g. "Male")
+                            match_code = val in valid_codes
+                            match_label = val in valid_labels
+                            
+                            # Float adjustment: 1.0 == 1
+                            if not match_code and isinstance(val, float) and val.is_integer():
+                                match_code = int(val) in valid_codes
+
+                            if not (match_code or match_label):
+                                # Find all rows with this invalid value
+                                mask = df_target[col] == val
+                                affected_rows = df_target[mask].index.tolist()
+                                
+                                # Limit logging to avoid explosion
+                                for r_idx in affected_rows[:5]: 
+                                    audit_logs.append({
+                                        "Fila": r_idx + 2,
+                                        "Variable": col,
+                                        "Valor Encontrado": str(val),
+                                        "Tipo de Error": "Valor Fuera de Rango",
+                                        "Mensaje": f"Valor no permitido. Opciones válidas: {list(valid_codes)[:10]}...",
+                                        "Criticidad": "MEDIA"
+                                    })
+                                if len(affected_rows) > 5:
+                                     audit_logs.append({
+                                        "Fila": "...",
+                                        "Variable": col,
+                                        "Valor Encontrado": str(val),
+                                        "Tipo de Error": "Valor Fuera de Rango",
+                                        "Mensaje": f"Total {len(affected_rows)} casos con este valor.",
+                                        "Criticidad": "MEDIA"
+                                     })
+
+                status.update(label="¡Auditoría Completada!", state="complete", expanded=False)
+            
+            # --- RESULTS VISUALIZATION ---
+            if not audit_logs:
+                st.balloons()
+                st.success("✨ **¡Perfecto!** No se encontraron discrepancias entre los datos y el patrón.")
+            else:
+                logs_df = pd.DataFrame(audit_logs)
+                
+                # Metrics
+                st.subheader("📊 Resultados")
+                m1, m2, m3 = st.columns(3)
+                m1.metric("Total Hallazgos", len(logs_df), delta_color="inverse")
+                m2.metric("Errores Críticos", len(logs_df[logs_df['Criticidad']=="ALTA"]), delta=None, delta_color="inverse")
+                m3.metric("Advertencias", len(logs_df[logs_df['Criticidad']=="BAJA"]) + len(logs_df[logs_df['Criticidad']=="MEDIA"]))
+
+                # Interactive Table
+                st.markdown("### 📝 Detalle de Discrepancias")
+                
+                # Filter by criticality
+                filter_crit = st.multiselect("Filtrar por Severidad:", ["ALTA", "MEDIA", "BAJA"], default=["ALTA", "MEDIA"])
+                if filter_crit:
+                    show_df = logs_df[logs_df['Criticidad'].isin(filter_crit)]
+                else:
+                    show_df = logs_df
+                
+                st.dataframe(
+                    show_df, 
+                    use_container_width=True, 
+                    column_config={
+                        "Criticidad": st.column_config.TextColumn(
+                            "Severidad",
+                            help="ALTA: Error estructural o de tipo. MEDIA: Valor fuera de rango.",
+                        ),
+                    }
+                )
+
+                # --- EXPORT REPORT ---
+                st.divider()
+                st.subheader("📥 Descargar Reporte")
+                
+                report_buffer = io.BytesIO()
+                with pd.ExcelWriter(report_buffer, engine='openpyxl') as writer:
+                    # 1. AUDIT LOG
+                    logs_df.to_excel(writer, sheet_name='AUDIT_LOG', index=False)
+                    
+                    # 2. DATA (Original)
+                    # We can highlight or add comments later, for now raw data
+                    df_target.to_excel(writer, sheet_name='DATA', index=False)
+                    
+                    # 3. METADATA (Pattern info)
+                    meta_info = []
+                    for c in df_ref.columns:
+                        meta_info.append({
+                            "Variable": c,
+                            "Etiqueta": meta_ref.column_names_to_labels.get(c, ""),
+                            "Valores Válidos": str(meta_ref.variable_value_labels.get(c, ""))
+                        })
+                    pd.DataFrame(meta_info).to_excel(writer, sheet_name='METADATA_REF', index=False)
+
+                st.download_button(
+                    label="📄 Descargar Excel de Auditoría (.xlsx)",
+                    data=report_buffer.getvalue(),
+                    file_name="Reporte_Auditoria_Calidad.xlsx",
+                    mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+                    use_container_width=True
+                )
+
 
 def main():
     st.sidebar.title("Navegación")
     tool_select = st.sidebar.radio(
         "Selecciona la Herramienta:",
-        ["Gestor y Exportador (Clásico)", "Editor Avanzado (Nuevo)"]
+        ["Gestor y Exportador (Clásico)", "Editor Avanzado (Nuevo)", "Auditoría de Calidad (Beta)"]
     )
     
     if tool_select == "Gestor y Exportador (Clásico)":
         tool_manager_exporter()
-    else:
+    elif tool_select == "Editor Avanzado (Nuevo)":
         tool_advanced_editor()
+    elif tool_select == "Auditoría de Calidad (Beta)":
+        tool_audit_validator()
 
 if __name__ == "__main__":
     main()
