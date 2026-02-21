@@ -949,6 +949,53 @@ def tool_audit_validator():
                     width="stretch"
                 )
 
+                # --- EXPORT TO NEW SAV ---
+                st.divider()
+                st.subheader("💾 Exportar Datos + Estructura (.sav)")
+                st.markdown("Genera un nuevo archivo SPSS combinando los datos validados con la estructura original del patrón (etiquetas de variables y valores).")
+
+                try:
+                    df_export = pd.DataFrame(columns=df_ref.columns)
+                    
+                    for col in df_ref.columns:
+                        if col in df_target.columns:
+                            # Alinear tipos de datos asegurando que respeten el df original para evitar errores en pyreadstat
+                            if pd.api.types.is_numeric_dtype(df_ref[col]):
+                                df_export[col] = pd.to_numeric(df_target[col], errors='coerce')
+                            else:
+                                # Convertir a string, limpiando posibles "nan" que vengan de datos nulos
+                                df_export[col] = df_target[col].copy()
+                                # Rellenar nulos con string vacío antes de convertir a string
+                                df_export[col] = df_export[col].fillna("")
+                                df_export[col] = df_export[col].astype(str)
+                        else:
+                            # La columna no existe en los datos target, la llenamos de nulos según el tipo original
+                            if pd.api.types.is_numeric_dtype(df_ref[col]):
+                                df_export[col] = pd.Series([float('nan')] * len(df_target), dtype="float64")
+                            else:
+                                df_export[col] = pd.Series([""] * len(df_target), dtype="object")
+                                
+                    export_sav_path = "temp_planchado.sav"
+                    pyreadstat.write_sav(
+                        df_export, 
+                        export_sav_path, 
+                        column_labels=meta_ref.column_names_to_labels,
+                        variable_value_labels=meta_ref.variable_value_labels
+                    )
+                    
+                    with open(export_sav_path, "rb") as f:
+                        sav_bytes = f.read()
+                        
+                    st.download_button(
+                        label="📥 Descargar SAV (Datos + Estructura)",
+                        data=sav_bytes,
+                        file_name="datos_planchados.sav",
+                        mime="application/x-spss-sav",
+                        width="stretch"
+                    )
+                except Exception as e:
+                    st.error(f"No se pudo generar el archivo SAV para descarga: {e}")
+
 
 # --- TOOL DATA STORYTELLING ---
 
