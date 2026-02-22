@@ -1270,24 +1270,17 @@ def tool_visualizer():
                                         
                                     table_rows.append([clean_txt(val), cat_label, str(count), f"{perc:.1f}%"])
                                 
-                                # 2. Storytelling: The Hook / Headline
+                                # 2. Título de la Variable (Pregunta)
                                 label = mod_labels.get(col, meta.column_names_to_labels.get(col, col))
                                 label_clean = clean_txt(label)
                                 
                                 pdf.set_fill_color(245, 245, 245)
-                                pdf.set_font('helvetica', 'B', 16)
-                                pdf.set_text_color(230, 57, 70) # Color de impacto rojo oscuro
-                                
-                                hook = f"El {max_perc:.1f}% se inclinó mayoritariamente por '{max_label}'"
-                                pdf.multi_cell(0, 10, hook, fill=True)
-                                pdf.ln(2)
-                                
-                                # 3. Storytelling: The Context
-                                pdf.set_font('helvetica', 'I', 11)
-                                pdf.set_text_color(100, 100, 100)
-                                pdf.multi_cell(0, 6, f"Contexto de la variable '{col}': {label_clean}")
+                                pdf.set_font('helvetica', 'B', 14)
+                                pdf.set_text_color(20, 20, 20)
+                                pdf.multi_cell(0, 10, f"Variable: [{col}] - {label_clean}", fill=True)
                                 pdf.ln(4)
                                 
+
                                 # 4. Storytelling: The Data
                                 pdf.set_text_color(0, 0, 0)
                                 
