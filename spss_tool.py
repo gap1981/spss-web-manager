@@ -7,6 +7,7 @@ import plotly.express as px
 import plotly.graph_objects as go
 
 import json
+from fpdf import FPDF
 
 # Configuración de la página para dispositivos móviles y escritorio
 st.set_page_config(
@@ -1042,11 +1043,12 @@ def tool_visualizer():
             df['Rango_Edad_Gen'] = "No Definido"
 
         # TABS
-        tab_quota, tab_demo, tab_vote, tab_cross = st.tabs([
+        tab_quota, tab_demo, tab_vote, tab_cross, tab_report = st.tabs([
             "📋 Control de Muestra", 
             "👥 Demográficos", 
             "🗳️ Escenarios", 
-            "🔄 Cruces"
+            "🔄 Cruces",
+            "📄 Reporte PDF"
         ])
 
         # A. CONTROL DE MUESTRA (QUOTA)
@@ -1159,6 +1161,131 @@ def tool_visualizer():
                         st.warning(f"No se pudo cruzar {v}: {e}")
             else:
                  st.info("Requiere variables de Voto y Género definidos.")
+
+        # E. REPORTE AUTOMÁTICO PDF (DATA STORYTELLING)
+        with tab_report:
+            st.subheader("📄 Generador de Reporte PDF (Storytelling)")
+            st.markdown("Genera un documento que incluye el análisis narrativo estadístico de cada pregunta cerrada (con etiquetas definidas).")
+            
+            if st.button("🚀 Generar Reporte Completo en PDF", type="secondary"):
+                with st.spinner("Compilando historia de datos..."):
+                    try:
+                        # Inicializar PDF
+                        class StoryPDF(FPDF):
+                            def header(self):
+                                self.set_font('helvetica', 'B', 15)
+                                self.set_text_color(0, 102, 204)
+                                self.cell(0, 10, 'Reporte de Storytelling de Datos', border=0, align='C')
+                                self.ln(15)
+                                
+                            def footer(self):
+                                self.set_y(-15)
+                                self.set_font('helvetica', 'I', 8)
+                                self.set_text_color(128, 128, 128)
+                                self.cell(0, 10, f'Página {self.page_no()}', 0, align='C')
+                        
+                        pdf = StoryPDF()
+                        pdf.set_auto_page_break(auto=True, margin=15)
+                        pdf.add_page()
+                        
+                        meta = st.session_state.meta
+                        mod_labels = st.session_state.modified_labels
+                        
+                        # Filtrar solo preguntas cerradas / con etiquetas
+                        target_cols = [c for c in df.columns if c in meta.variable_value_labels]
+                        
+                        if not target_cols:
+                            pdf.set_font('helvetica', '', 12)
+                            pdf.cell(0, 10, 'No hay variables categoricas o cerradas para analizar.')
+                            pdf_bytes = bytes(pdf.output())
+                        else:
+                            import string
+                            def clean_txt(t):
+                                if pd.isna(t): return "N/A"
+                                t = str(t)
+                                valid_chars = "-_.() %s%s" % (string.ascii_letters, string.digits)
+                                return ''.join(c for c in t if c in valid_chars or c in 'áéíóúÁÉÍÓÚñÑ¿?¡!')
+                                
+                            for col in target_cols:
+                                # 1. Sintaxis (Etiquetas)
+                                label = mod_labels.get(col, meta.column_names_to_labels.get(col, col))
+                                label_clean = clean_txt(label)
+                                val_labels = meta.variable_value_labels[col]
+                                
+                                pdf.set_font('helvetica', 'B', 14)
+                                pdf.set_text_color(0, 0, 0)
+                                pdf.multi_cell(0, 8, f"Variable: {col} - {label_clean}")
+                                pdf.ln(2)
+                                
+                                # 2. Cálculos estadísticos
+                                counts = df[col].value_counts(dropna=False)
+                                total = len(df)
+                                
+                                table_rows = []
+                                max_perc = -1
+                                max_label = ""
+                                
+                                for val, count in counts.items():
+                                    perc = (count / total) * 100 if total > 0 else 0
+                                    
+                                    if pd.isna(val):
+                                        cat_label = "Perdido/Sin Dato"
+                                    else:
+                                        lookup_val = int(val) if isinstance(val, (float, int)) and val == int(val) else val
+                                        cat_label = val_labels.get(lookup_val, val_labels.get(str(val), "Sin etiqueta"))
+                                        cat_label = clean_txt(cat_label)
+                                    
+                                    if perc > max_perc and not pd.isna(val):
+                                        max_perc = perc
+                                        max_label = cat_label
+                                        
+                                    table_rows.append([clean_txt(val), cat_label, str(count), f"{perc:.1f}%"])
+                                
+                                # 3. Storytelling Insight (Técnica de Contrast/Comparasion / Contexto)
+                                pdf.set_font('helvetica', 'B', 12)
+                                pdf.set_text_color(46, 134, 171) # Color azul para destacar insight
+                                narrative = f"Insight Destacado: La mayoría absoluta u opción principal ({max_perc:.1f}%) se inclinó por '{max_label}'."
+                                pdf.multi_cell(0, 8, narrative)
+                                pdf.set_text_color(0, 0, 0)
+                                pdf.ln(3)
+                                
+                                # 4. Tablas (Evidencia Data-storytelling)
+                                pdf.set_font('helvetica', 'B', 10)
+                                pdf.set_fill_color(240, 240, 240)
+                                col_widths = [20, 110, 30, 30]
+                                headers = ["Valor", "Etiqueta", "Casos", "Porcentaje"]
+                                for h, w in zip(headers, col_widths):
+                                    pdf.cell(w, 8, h, border=1, align='C', fill=True)
+                                pdf.ln()
+                                
+                                pdf.set_font('helvetica', '', 10)
+                                for row in table_rows:
+                                    for item, w in zip(row, col_widths):
+                                        item = str(item)
+                                        # Recortar si es muy largo para la celda
+                                        if len(item) > int(w/2) and w > 30:
+                                            item = item[:int(w/2)-3] + "..."
+                                        pdf.cell(w, 8, item, border=1, align='L' if w > 30 else 'C')
+                                    pdf.ln()
+                                pdf.ln(10)
+                                
+                            pdf_bytes = bytes(pdf.output())
+                            
+                    except Exception as e:
+                        st.error(f"Error generando PDF: {e}")
+                        pdf_bytes = None
+                        
+                    if pdf_bytes:
+                        st.success("¡Reporte narrativo generado exitosamente!")
+                        st.download_button(
+                            label="📥 Descargar Reporte PDF",
+                            data=pdf_bytes,
+                            file_name="Reporte_Estadistico.pdf",
+                            mime="application/pdf",
+                            type="primary",
+                            width="stretch"
+                        )
+
 
     elif not run_viz:
         st.info("👈 Configura las variables en el menú lateral y presiona 'Generar Historia'.")
