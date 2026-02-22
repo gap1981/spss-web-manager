@@ -1019,16 +1019,35 @@ def tool_visualizer():
         st.info("Define qué representa cada columna:")
         
         cols = df.columns.tolist()
+        meta = st.session_state.meta
+        mod_labels = st.session_state.modified_labels
         
-        var_genero = st.selectbox("Género (Sex)", ["-- Seleccionar --"] + cols, index=0)
-        var_edad = st.selectbox("Edad (Numérica)", ["-- Seleccionar --"] + cols, index=0)
-        var_zona = st.selectbox("Zona / Localidad", ["-- Seleccionar --"] + cols, index=0)
+        # Función para darle formato lindo a las opciones "[ID] - Etiqueta"
+        def format_var_option(col_name):
+            if col_name == "-- Seleccionar --":
+                return col_name
+            label = mod_labels.get(col_name, meta.column_names_to_labels.get(col_name, col_name))
+            # Recortar etiqueta muy larga para la UI
+            if len(label) > 60: label = label[:57] + "..."
+            return f"[{col_name}] {label}"
+            
+        options_list = ["-- Seleccionar --"] + cols
+        
+        # Selecciones en la UI (muestran el formato lindo pero guardamos la selección completa)
+        sel_genero_fmt = st.selectbox("Género (Sex)", options_list, format_func=format_var_option, index=0)
+        sel_edad_fmt = st.selectbox("Edad (Numérica)", options_list, format_func=format_var_option, index=0)
+        sel_zona_fmt = st.selectbox("Zona / Localidad", options_list, format_func=format_var_option, index=0)
+        
+        # Recuperar el nombre original de la columna elegida (ya que los selectbox devuelven la opción de 'options_list', que es el nombre corto)
+        var_genero = sel_genero_fmt
+        var_edad = sel_edad_fmt
+        var_zona = sel_zona_fmt
         
         st.divider()
         st.write("Variables de Interés")
-        vars_voto = st.multiselect("Intención de Voto / Imagen", cols)
+        vars_voto = st.multiselect("Intención de Voto / Imagen", cols, format_func=format_var_option)
         
-        run_viz = st.button("✨ Generar Historia", type="primary")
+        run_viz = st.button("✨ Generar Dashboard y PDF", type="primary")
 
     # 3. DASHBOARD GENERATION
     if run_viz:
@@ -1206,24 +1225,27 @@ def tool_visualizer():
                                 valid_chars = "-_.() %s%s" % (string.ascii_letters, string.digits)
                                 return ''.join(c for c in t if c in valid_chars or c in 'áéíóúÁÉÍÓÚñÑ¿?¡!')
                                 
+                            # Portada de Storytelling
+                            pdf.set_font('helvetica', 'B', 24)
+                            pdf.set_text_color(46, 134, 171)
+                            pdf.cell(0, 20, "Resumen Ejecutivo de la Encuesta", align='C')
+                            pdf.ln(20)
+                            
+                            pdf.set_font('helvetica', '', 12)
+                            pdf.set_text_color(0, 0, 0)
+                            intro_text = f"Análisis narrativo extrayendo los principales insights (Data Storytelling) para un total de {len(target_cols)} variables cerradas.\nSe presenta en formato 'The Hook -> The Context -> The Data' para maximizar la legibilidad y el impacto de los hallazgos."
+                            pdf.multi_cell(0, 8, intro_text)
+                            pdf.ln(15)
+                            
                             for col in target_cols:
-                                # 1. Sintaxis (Etiquetas)
-                                label = mod_labels.get(col, meta.column_names_to_labels.get(col, col))
-                                label_clean = clean_txt(label)
-                                val_labels = meta.variable_value_labels[col]
-                                
-                                pdf.set_font('helvetica', 'B', 14)
-                                pdf.set_text_color(0, 0, 0)
-                                pdf.multi_cell(0, 8, f"Variable: {col} - {label_clean}")
-                                pdf.ln(2)
-                                
-                                # 2. Cálculos estadísticos
+                                # 1. Cálculos estadísticos (requeridos primero para encontrar el highlight)
                                 counts = df[col].value_counts(dropna=False)
                                 total = len(df)
                                 
                                 table_rows = []
                                 max_perc = -1
                                 max_label = ""
+                                val_labels = meta.variable_value_labels[col]
                                 
                                 for val, count in counts.items():
                                     perc = (count / total) * 100 if total > 0 else 0
@@ -1241,13 +1263,26 @@ def tool_visualizer():
                                         
                                     table_rows.append([clean_txt(val), cat_label, str(count), f"{perc:.1f}%"])
                                 
-                                # 3. Storytelling Insight (Técnica de Contrast/Comparasion / Contexto)
-                                pdf.set_font('helvetica', 'B', 12)
-                                pdf.set_text_color(46, 134, 171) # Color azul para destacar insight
-                                narrative = f"Insight Destacado: La mayoría absoluta u opción principal ({max_perc:.1f}%) se inclinó por '{max_label}'."
-                                pdf.multi_cell(0, 8, narrative)
+                                # 2. Storytelling: The Hook / Headline
+                                label = mod_labels.get(col, meta.column_names_to_labels.get(col, col))
+                                label_clean = clean_txt(label)
+                                
+                                pdf.set_fill_color(245, 245, 245)
+                                pdf.set_font('helvetica', 'B', 16)
+                                pdf.set_text_color(230, 57, 70) # Color de impacto rojo oscuro
+                                
+                                hook = f"El {max_perc:.1f}% se inclinó mayoritariamente por '{max_label}'"
+                                pdf.multi_cell(0, 10, hook, fill=True)
+                                pdf.ln(2)
+                                
+                                # 3. Storytelling: The Context
+                                pdf.set_font('helvetica', 'I', 11)
+                                pdf.set_text_color(100, 100, 100)
+                                pdf.multi_cell(0, 6, f"Contexto de la variable '{col}': {label_clean}")
+                                pdf.ln(4)
+                                
+                                # 4. Storytelling: The Data
                                 pdf.set_text_color(0, 0, 0)
-                                pdf.ln(3)
                                 
                                 # 4. Tablas (Evidencia Data-storytelling)
                                 pdf.set_font('helvetica', 'B', 10)
@@ -1288,7 +1323,7 @@ def tool_visualizer():
 
 
     elif not run_viz:
-        st.info("👈 Configura las variables en el menú lateral y presiona 'Generar Historia'.")
+        st.info("👈 Configura las variables en el menú lateral o genera el reporte PDF directo.")
 
 
 def main():
