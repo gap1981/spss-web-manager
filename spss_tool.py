@@ -1047,10 +1047,17 @@ def tool_visualizer():
         st.write("Variables de Interés")
         vars_voto = st.multiselect("Intención de Voto / Imagen", cols, format_func=format_var_option)
         
-        run_viz = st.button("✨ Generar Dashboard y PDF", type="primary")
+        run_viz_btn = st.button("✨ Generar Dashboard y PDF", type="primary")
+        
+        # Persistir el estado del dashboard para que al tocar PDF no desaparezca
+        if 'show_dashboard' not in st.session_state:
+            st.session_state.show_dashboard = False
+            
+        if run_viz_btn:
+            st.session_state.show_dashboard = True
 
     # 3. DASHBOARD GENERATION
-    if run_viz:
+    if st.session_state.show_dashboard:
         
         # PRE-PROCESSING: AGE RANGES
         if var_edad != "-- Seleccionar --" and pd.api.types.is_numeric_dtype(df[var_edad]):
@@ -1322,7 +1329,7 @@ def tool_visualizer():
                         )
 
 
-    elif not run_viz:
+    elif not st.session_state.show_dashboard:
         st.info("👈 Configura las variables en el menú lateral o genera el reporte PDF directo.")
 
 
