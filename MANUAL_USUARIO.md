@@ -61,6 +61,7 @@ Usa este módulo cuando necesites intervenir los datos a nivel de celda o estruc
 ### 📝 Edición de Datos
 *   **Pestaña "Vista de Datos"**: Funciona como una hoja de cálculo. Haz doble clic en cualquier celda para editar su valor.
 *   **Pestaña "Vista de Variables"**: Edita las etiquetas y los *Value Labels* (en formato JSON) de forma masiva.
+*   *Nota*: La interfaz incluye bloques informativos contextuales en cada pestaña para facilitar su uso.
 
 ---
 
@@ -79,15 +80,16 @@ Requieres dos archivos:
 3.  El sistema verificará:
     *   **Estructura**: Que no falten variables obligatorias.
     *   **Tipos**: Que no haya texto en campos numéricos.
-    *   **Rangos**: Que los valores coincidan con las etiquetas definidas en el SPSS (ej: si `Sexo` es `1` o `2`, un `3` será error).
+    *   **Rangos**: Que los valores coincidan con las etiquetas definidas en el SPSS (mostrando el mensaje "Dato no definido dentro de las etiquetas").
+    *   **Orden de ID**: Valida que columnas tipo "id" o "encuesta" estén ordenadas.
+    *   **Teléfonos Duplicados**: Advierte si encuentra números repetidos en campos tipo "tel" o "celular".
 
-### 📊 Resultados y Reporte
-*   Verás métricas en pantalla (Errores Críticos, Advertencias).
-*   Puedes filtrar y explorar la tabla de errores en la web.
-*   **Descarga el Reporte Excel**, que incluye:
-    *   `AUDIT_LOG`: Lista exacta de errores y dónde encontrarlos.
-    *   `DATA`: Tus datos originales para referencia.
-    *   `METADATA_REF`: El diccionario del patrón para comparar.
+### 📊 Resultados y Exportación Avanzada
+*   Verás métricas en pantalla (Errores Críticos, Advertencias) y una tabla interactiva resumida.
+*   **Selección de Eliminación**: Si hay columnas en el Excel original que ya no deseas en la base final, puedes seleccionarlas en un menú desplegable para eliminarlas *antes* de exportar.
+*   **Descarga de Resultados (Sin Limitaciones)**:
+    *   **Reporte de Hallazgos (.xlsx)**: Exporta una lista exacta de errores, los datos validados y los metadatos para referencia.
+    *   **Datos + Estructura (.sav)**: Genera y descarga instantáneamente tu nuevo archivo SPSS combinando los datos del proveedor (Excel) con las reglas y estructura de tu padrón original, integrando los ajustes realizados en el acto. Esta opción siempre está disponible independientemente de la cantidad de errores encontrados.
 
 ---
 

@@ -832,7 +832,7 @@ def tool_audit_validator():
                     col_lower = col.lower()
                     
                     # A. ID Ordering Check
-                    if any(k in col_lower for k in ['id', 'folio', 'encuesta', 'nro_encuesta']):
+                    if col_lower in ['id', 'folio', 'encuesta', 'nro_encuesta'] or col_lower.startswith('id_') or col_lower.endswith('_id'):
                         non_nulls = df_target[col].dropna().tolist()
                         if non_nulls:
                             try:
@@ -852,7 +852,7 @@ def tool_audit_validator():
                     
                     import re
                     # B. Phone Checks (Duplicates Only)
-                    if any(k in col_lower for k in ['tel', 'telefono', 'celular', 'movil', 'whatsapp', 'cel']):
+                    if any(k in col_lower for k in ['telefono', 'celular', 'movil', 'whatsapp']) or col_lower in ['tel', 'cel']:
                         non_nulls = df_target[col].dropna().astype(str)
                         if not non_nulls.empty:
                              # Duplicates
@@ -1055,12 +1055,16 @@ def tool_audit_validator():
                     # Clean up missing column metadata to avoid sav export crash
                     export_col_labels = {k:v for k,v in meta_ref.column_names_to_labels.items() if k in cols_for_sav}
                     export_val_labels = {k:v for k,v in meta_ref.variable_value_labels.items() if k in cols_for_sav}
+                    export_var_formats = {k:v for k,v in meta_ref.original_variable_types.items() if k in cols_for_sav}
+                    export_var_measure = {k:v for k,v in meta_ref.variable_measure.items() if k in cols_for_sav}
                     
                     pyreadstat.write_sav(
                         df_export, 
                         export_sav_path, 
                         column_labels=export_col_labels,
-                        variable_value_labels=export_val_labels
+                        variable_value_labels=export_val_labels,
+                        variable_formats=export_var_formats,
+                        variable_measure=export_var_measure
                     )
                     
                     with open(export_sav_path, "rb") as f:

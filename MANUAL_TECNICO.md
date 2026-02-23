@@ -51,15 +51,16 @@ Proporciona capacidades de edición profunda.
 ### C. `tool_audit_validator()` (Nuevo)
 Módulo de auditoría de calidad.
 *   **Input**: Recibe `.sav` (Patrón) y `.xlsx/.csv` (Target).
+*   **Gestión de Estado**: Utiliza `st.session_state` (`audit_signature`, `audit_executed`, `current_audit_logs`) para mantener persistencia tras la validación y evitar que la UI colapse al usar filtros o menús de exportación.
 *   **Validación Estructural**:
     *   `Missing Columns`: `set(ref) - set(target)`
     *   `Extra Columns`: `set(target) - set(ref)`
-*   **Validación de Tipos**:
-    *   Verifica si columnas numéricas en patrón contienen strings en target usando `pd.to_numeric(errors='coerce')`.
-*   **Validación de Valores (Value Labels)**:
-    *   Extrae valores válidos de `meta.variable_value_labels`.
-    *   Normaliza tipos (int vs float) para comparaciones robustas.
-    *   Itera sobre valores únicos (`unique()`) para optimizar rendimiento.
+*   **Heurísticas de Validación**:
+    *   Verifica si columnas numéricas en patrón contienen strings en target (Type Mismatch).
+    *   **Value Labels**: Extrae valores válidos del meta y compara.
+    *   **ID Ordering**: Detecta campos `id|folio|encuesta` y lanza warnings si no están ordenados numérica o alfabéticamente.
+    *   **Phone Duplicates**: Detecta campos `tel|celular|whatsapp` y marca errores críticos si encuentra repeticiones. Almacena solo las primeras 5 filas por valor duplicado para evitar memory bounds en el UI.
+*   **Exportación Purgable**: Soporta eliminación selectiva de columnas mediante un `multiselect` que regenera un target modificado de manera dinámica antes de invocar a Pyreadstat para escribir el nuevo SAV estructurado.
 
 ### D. `tool_visualizer()` (Data Storytelling)
 Módulo de visualización y narrativa.
