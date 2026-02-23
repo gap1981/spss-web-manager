@@ -771,6 +771,13 @@ def tool_audit_validator():
             st.error(f"Error crítico al leer el archivo de datos: {e}")
             return
 
+        # Handle session state to decouple rendering from execute button
+        current_files_signature = f"{ref_file.name}-{target_file.name}-{ref_file.size}-{target_file.size}"
+        if st.session_state.get('audit_signature') != current_files_signature:
+            st.session_state['audit_executed'] = False
+            st.session_state['current_audit_logs'] = []
+            st.session_state['audit_signature'] = current_files_signature
+
         # 3. EXECUTE AUDIT
         if st.button("🚀 Ejecutar Validación Completa", type="primary", width="stretch"):
             
@@ -927,9 +934,13 @@ def tool_audit_validator():
                                         "Criticidad": "MEDIA"
                                      })
 
+                st.session_state['current_audit_logs'] = audit_logs
+                st.session_state['audit_executed'] = True
                 status.update(label="¡Auditoría Completada!", state="complete", expanded=False)
             
-            # --- RESULTS VISUALIZATION ---
+        # --- RESULTS VISUALIZATION & EXPORTS ---
+        if st.session_state.get('audit_executed', False):
+            audit_logs = st.session_state['current_audit_logs']
             if not audit_logs:
                 st.balloons()
                 st.success("✨ **¡Perfecto!** No se encontraron discrepancias entre los datos y el patrón.")
@@ -964,106 +975,106 @@ def tool_audit_validator():
                     }
                 )
 
-                # --- EXPORT REPORT ---
-                st.divider()
-                st.subheader("📥 Exportar Resultados y Datos Ajustados")
-                st.info("Aquí puedes descargar el reporte Excel con los hallazgos y el nuevo SAV con los datos corregidos. También puedes seleccionar variables para eliminarlas del archivo final.")
-                
-                # Deletion multiselect
-                cols_to_delete = st.multiselect("🗑️ Selecciona columnas a eliminar de las exportaciones finales:", options=df_target.columns.tolist())
-                
-                if cols_to_delete:
-                    # Drop selected columns from target data to be used in exports
-                    df_target_export = df_target.drop(columns=cols_to_delete)
-                else:
-                    df_target_export = df_target.copy()
-                
-                col_btn_rep, col_btn_sav = st.columns(2)
-                
-                with col_btn_rep:
-                    st.markdown("#### 📄 Reporte de Hallazgos (.xlsx)")
-                    st.markdown("Exporta el registro de hallazgos y los datos revisados.")
-                    report_buffer = io.BytesIO()
-                    with pd.ExcelWriter(report_buffer, engine='openpyxl') as writer:
-                        # 1. AUDIT LOG
-                        if 'logs_df' in locals():
-                            logs_df.to_excel(writer, sheet_name='AUDIT_LOG', index=False)
+            # --- EXPORT REPORT (ALWAYS VISIBLE AFTER AUDIT) ---
+            st.divider()
+            st.subheader("📥 Exportar Resultados y Datos Ajustados")
+            st.info("Aquí puedes descargar el reporte Excel con los hallazgos y el nuevo SAV con los datos corregidos. También puedes seleccionar variables para eliminarlas del archivo final.")
+            
+            # Deletion multiselect
+            cols_to_delete = st.multiselect("🗑️ Selecciona columnas a eliminar de las exportaciones finales:", options=df_target.columns.tolist())
+            
+            if cols_to_delete:
+                # Drop selected columns from target data to be used in exports
+                df_target_export = df_target.drop(columns=cols_to_delete)
+            else:
+                df_target_export = df_target.copy()
+            
+            col_btn_rep, col_btn_sav = st.columns(2)
+            
+            with col_btn_rep:
+                st.markdown("#### 📄 Reporte de Hallazgos (.xlsx)")
+                st.markdown("Exporta el registro de hallazgos y los datos revisados.")
+                report_buffer = io.BytesIO()
+                with pd.ExcelWriter(report_buffer, engine='openpyxl') as writer:
+                    # 1. AUDIT LOG
+                    if 'logs_df' in locals():
+                        logs_df.to_excel(writer, sheet_name='AUDIT_LOG', index=False)
+                    else:
+                        pd.DataFrame([{"Mensaje": "Sin hallazgos"}]).to_excel(writer, sheet_name='AUDIT_LOG', index=False)
+                    
+                    # 2. DATA (Original target without deleted cols)
+                    df_target_export.to_excel(writer, sheet_name='DATA', index=False)
+                    
+                    # 3. METADATA (Pattern info)
+                    meta_info = []
+                    for c in df_ref.columns:
+                        meta_info.append({
+                            "Variable": c,
+                            "Etiqueta": meta_ref.column_names_to_labels.get(c, ""),
+                            "Valores Válidos": str(meta_ref.variable_value_labels.get(c, ""))
+                        })
+                    pd.DataFrame(meta_info).to_excel(writer, sheet_name='METADATA_REF', index=False)
+
+                st.download_button(
+                    label="📄 Descargar Excel de Auditoría",
+                    data=report_buffer.getvalue(),
+                    file_name="Reporte_Auditoria_Calidad.xlsx",
+                    mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+                    width="stretch"
+                )
+
+            with col_btn_sav:
+                # --- EXPORT TO NEW SAV ---
+                st.markdown("#### 💾 Datos + Estructura (.sav)")
+                st.markdown("Genera un nuevo archivo SPSS combinando datos y estructura.")
+
+                try:
+                    cols_for_sav = [c for c in df_ref.columns if c not in cols_to_delete]
+                    df_export = pd.DataFrame(columns=cols_for_sav)
+                    
+                    for col in cols_for_sav:
+                        if col in df_target_export.columns:
+                            # Alinear tipos de datos asegurando que respeten el df original para evitar errores en pyreadstat
+                            if pd.api.types.is_numeric_dtype(df_ref[col]):
+                                df_export[col] = pd.to_numeric(df_target_export[col], errors='coerce')
+                            else:
+                                # Convertir a string, limpiando posibles "nan" que vengan de datos nulos
+                                df_export[col] = df_target_export[col].copy()
+                                # Rellenar nulos con string vacío antes de convertir a string
+                                df_export[col] = df_export[col].fillna("")
+                                df_export[col] = df_export[col].astype(str)
                         else:
-                            pd.DataFrame([{"Mensaje": "Sin hallazgos"}]).to_excel(writer, sheet_name='AUDIT_LOG', index=False)
+                            # La columna no existe en los datos target, la llenamos de nulos según el tipo original
+                            if pd.api.types.is_numeric_dtype(df_ref[col]):
+                                df_export[col] = pd.Series([float('nan')] * len(df_target_export), dtype="float64")
+                            else:
+                                df_export[col] = pd.Series([""] * len(df_target_export), dtype="object")
+                                
+                    export_sav_path = "temp_planchado.sav"
+                    
+                    # Clean up missing column metadata to avoid sav export crash
+                    export_col_labels = {k:v for k,v in meta_ref.column_names_to_labels.items() if k in cols_for_sav}
+                    export_val_labels = {k:v for k,v in meta_ref.variable_value_labels.items() if k in cols_for_sav}
+                    
+                    pyreadstat.write_sav(
+                        df_export, 
+                        export_sav_path, 
+                        column_labels=export_col_labels,
+                        variable_value_labels=export_val_labels
+                    )
+                    
+                    with open(export_sav_path, "rb") as f:
+                        sav_bytes = f.read()
                         
-                        # 2. DATA (Original target without deleted cols)
-                        df_target_export.to_excel(writer, sheet_name='DATA', index=False)
-                        
-                        # 3. METADATA (Pattern info)
-                        meta_info = []
-                        for c in df_ref.columns:
-                            meta_info.append({
-                                "Variable": c,
-                                "Etiqueta": meta_ref.column_names_to_labels.get(c, ""),
-                                "Valores Válidos": str(meta_ref.variable_value_labels.get(c, ""))
-                            })
-                        pd.DataFrame(meta_info).to_excel(writer, sheet_name='METADATA_REF', index=False)
-    
                     st.download_button(
-                        label="📄 Descargar Excel de Auditoría",
-                        data=report_buffer.getvalue(),
-                        file_name="Reporte_Auditoria_Calidad.xlsx",
-                        mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+                        label="📥 Descargar SAV Patcheado",
+                        data=sav_bytes,
+                        file_name="datos_planchados.sav",
+                        mime="application/x-spss-sav",
                         width="stretch"
                     )
-    
-                with col_btn_sav:
-                    # --- EXPORT TO NEW SAV ---
-                    st.markdown("#### 💾 Datos + Estructura (.sav)")
-                    st.markdown("Genera un nuevo archivo SPSS combinando datos y estructura.")
-    
-                    try:
-                        cols_for_sav = [c for c in df_ref.columns if c not in cols_to_delete]
-                        df_export = pd.DataFrame(columns=cols_for_sav)
-                        
-                        for col in cols_for_sav:
-                            if col in df_target_export.columns:
-                                # Alinear tipos de datos asegurando que respeten el df original para evitar errores en pyreadstat
-                                if pd.api.types.is_numeric_dtype(df_ref[col]):
-                                    df_export[col] = pd.to_numeric(df_target_export[col], errors='coerce')
-                                else:
-                                    # Convertir a string, limpiando posibles "nan" que vengan de datos nulos
-                                    df_export[col] = df_target_export[col].copy()
-                                    # Rellenar nulos con string vacío antes de convertir a string
-                                    df_export[col] = df_export[col].fillna("")
-                                    df_export[col] = df_export[col].astype(str)
-                            else:
-                                # La columna no existe en los datos target, la llenamos de nulos según el tipo original
-                                if pd.api.types.is_numeric_dtype(df_ref[col]):
-                                    df_export[col] = pd.Series([float('nan')] * len(df_target_export), dtype="float64")
-                                else:
-                                    df_export[col] = pd.Series([""] * len(df_target_export), dtype="object")
-                                    
-                        export_sav_path = "temp_planchado.sav"
-                        
-                        # Clean up missing column metadata to avoid sav export crash
-                        export_col_labels = {k:v for k,v in meta_ref.column_names_to_labels.items() if k in cols_for_sav}
-                        export_val_labels = {k:v for k,v in meta_ref.variable_value_labels.items() if k in cols_for_sav}
-                        
-                        pyreadstat.write_sav(
-                            df_export, 
-                            export_sav_path, 
-                            column_labels=export_col_labels,
-                            variable_value_labels=export_val_labels
-                        )
-                        
-                        with open(export_sav_path, "rb") as f:
-                            sav_bytes = f.read()
-                            
-                        st.download_button(
-                            label="📥 Descargar SAV Patcheado",
-                            data=sav_bytes,
-                            file_name="datos_planchados.sav",
-                            mime="application/x-spss-sav",
-                            width="stretch"
-                        )
-                    except Exception as e:
-                        st.error(f"No se pudo generar el archivo SAV: {e}")
+                except Exception as e:
+                    st.error(f"No se pudo generar el archivo SAV: {e}")
 
 
 # --- TOOL DATA STORYTELLING ---
