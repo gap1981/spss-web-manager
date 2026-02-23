@@ -1063,7 +1063,7 @@ def tool_audit_validator():
                         export_sav_path, 
                         column_labels=export_col_labels,
                         variable_value_labels=export_val_labels,
-                        variable_formats=export_var_formats,
+                        variable_format=export_var_formats,
                         variable_measure=export_var_measure
                     )
                     
