@@ -642,6 +642,7 @@ def tool_advanced_editor():
 
         # --- 1. VISTA DE DATOS ---
         with tab_data:
+            st.info("💡 **Vista de Datos:** Aquí puedes visualizar y editar directamente los valores de las respuestas recolectadas. Cada fila es una encuesta/registro y cada columna es una variable. Los cambios se guardarán en memoria hasta que presiones 'Guardar'.")
             # Editor de datos principal
             edited_df = st.data_editor(
                 st.session_state['data_df'],
@@ -657,6 +658,7 @@ def tool_advanced_editor():
 
         # --- 2. VISTA DE VARIABLES ---
         with tab_vars:
+            st.info("💡 **Vista de Variables:** Aquí puedes editar la estructura del archivo. Puedes modificar el nombre descriptivo de cada variable (Etiqueta) y los valores permitidos (Etiquetas de Valor, en formato JSON).")
             st.markdown("##### Metadatos de Variables")
             
             # Preparar DataFrame de Metadatos para el editor
@@ -819,6 +821,49 @@ def tool_audit_validator():
                     is_numeric_ref = pd.api.types.is_numeric_dtype(df_ref[col])
                     valid_range = meta_ref.variable_value_labels.get(col, {})
                     
+                    # 0. Custom Heuristics Validation
+                    col_lower = col.lower()
+                    
+                    # A. ID Ordering Check
+                    if any(k in col_lower for k in ['id', 'folio', 'encuesta', 'nro_encuesta']):
+                        non_nulls = df_target[col].dropna().tolist()
+                        if non_nulls:
+                            try:
+                                is_sorted = sorted(non_nulls, key=float) == non_nulls
+                            except ValueError:
+                                is_sorted = sorted(non_nulls, key=str) == non_nulls
+                                
+                            if not is_sorted:
+                                audit_logs.append({
+                                    "Fila": "N/A",
+                                    "Variable": col,
+                                    "Valor Encontrado": "N/A",
+                                    "Tipo de Error": "Ordenamiento ID",
+                                    "Mensaje": "El campo ID no está ordenado alfabéticamente/numéricamente.",
+                                    "Criticidad": "MEDIA"
+                                })
+                    
+                    import re
+                    # B. Phone Checks (Duplicates Only)
+                    if any(k in col_lower for k in ['tel', 'telefono', 'celular', 'movil', 'whatsapp', 'cel']):
+                        non_nulls = df_target[col].dropna().astype(str)
+                        if not non_nulls.empty:
+                             # Duplicates
+                             dupes = non_nulls[non_nulls.duplicated()]
+                             for dup_val in dupes.unique():
+                                 if dup_val.strip() == "": continue
+                                 
+                                 dup_indices = df_target[df_target[col].astype(str) == dup_val].index.tolist()
+                                 for r_idx in dup_indices[:5]:
+                                     audit_logs.append({
+                                         "Fila": r_idx + 2,
+                                         "Variable": col,
+                                         "Valor Encontrado": str(dup_val),
+                                         "Tipo de Error": "Duplicado",
+                                         "Mensaje": "Teléfono repetido encontrado.",
+                                         "Criticidad": "MEDIA"
+                                     })
+                    
                     # Analyze Target Column
                     # We iterate unique values for performance, assuming categorical data usually has limited cardinality
                     # For continuous data, simple type check is used
@@ -867,11 +912,11 @@ def tool_audit_validator():
                                     audit_logs.append({
                                         "Fila": r_idx + 2,
                                         "Variable": col,
-                                        "Valor Encontrado": str(val),
-                                        "Tipo de Error": "Valor Fuera de Rango",
-                                        "Mensaje": f"Valor no permitido. Opciones válidas: {list(valid_codes)[:10]}...",
-                                        "Criticidad": "MEDIA"
-                                    })
+                                         "Valor Encontrado": str(val),
+                                         "Tipo de Error": "Valor Fuera de Rango",
+                                         "Mensaje": f"Dato no definido dentro de las etiquetas. (Categorías válidas: {list(valid_codes)[:5]}...)",
+                                         "Criticidad": "MEDIA"
+                                     })
                                 if len(affected_rows) > 5:
                                      audit_logs.append({
                                         "Fila": "...",
@@ -921,81 +966,104 @@ def tool_audit_validator():
 
                 # --- EXPORT REPORT ---
                 st.divider()
-                st.subheader("📥 Descargar Reporte")
+                st.subheader("📥 Exportar Resultados y Datos Ajustados")
+                st.info("Aquí puedes descargar el reporte Excel con los hallazgos y el nuevo SAV con los datos corregidos. También puedes seleccionar variables para eliminarlas del archivo final.")
                 
-                report_buffer = io.BytesIO()
-                with pd.ExcelWriter(report_buffer, engine='openpyxl') as writer:
-                    # 1. AUDIT LOG
-                    logs_df.to_excel(writer, sheet_name='AUDIT_LOG', index=False)
-                    
-                    # 2. DATA (Original)
-                    # We can highlight or add comments later, for now raw data
-                    df_target.to_excel(writer, sheet_name='DATA', index=False)
-                    
-                    # 3. METADATA (Pattern info)
-                    meta_info = []
-                    for c in df_ref.columns:
-                        meta_info.append({
-                            "Variable": c,
-                            "Etiqueta": meta_ref.column_names_to_labels.get(c, ""),
-                            "Valores Válidos": str(meta_ref.variable_value_labels.get(c, ""))
-                        })
-                    pd.DataFrame(meta_info).to_excel(writer, sheet_name='METADATA_REF', index=False)
-
-                st.download_button(
-                    label="📄 Descargar Excel de Auditoría (.xlsx)",
-                    data=report_buffer.getvalue(),
-                    file_name="Reporte_Auditoria_Calidad.xlsx",
-                    mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-                    width="stretch"
-                )
-
-                # --- EXPORT TO NEW SAV ---
-                st.divider()
-                st.subheader("💾 Exportar Datos + Estructura (.sav)")
-                st.markdown("Genera un nuevo archivo SPSS combinando los datos validados con la estructura original del patrón (etiquetas de variables y valores).")
-
-                try:
-                    df_export = pd.DataFrame(columns=df_ref.columns)
-                    
-                    for col in df_ref.columns:
-                        if col in df_target.columns:
-                            # Alinear tipos de datos asegurando que respeten el df original para evitar errores en pyreadstat
-                            if pd.api.types.is_numeric_dtype(df_ref[col]):
-                                df_export[col] = pd.to_numeric(df_target[col], errors='coerce')
-                            else:
-                                # Convertir a string, limpiando posibles "nan" que vengan de datos nulos
-                                df_export[col] = df_target[col].copy()
-                                # Rellenar nulos con string vacío antes de convertir a string
-                                df_export[col] = df_export[col].fillna("")
-                                df_export[col] = df_export[col].astype(str)
+                # Deletion multiselect
+                cols_to_delete = st.multiselect("🗑️ Selecciona columnas a eliminar de las exportaciones finales:", options=df_target.columns.tolist())
+                
+                if cols_to_delete:
+                    # Drop selected columns from target data to be used in exports
+                    df_target_export = df_target.drop(columns=cols_to_delete)
+                else:
+                    df_target_export = df_target.copy()
+                
+                col_btn_rep, col_btn_sav = st.columns(2)
+                
+                with col_btn_rep:
+                    st.markdown("#### 📄 Reporte de Hallazgos (.xlsx)")
+                    st.markdown("Exporta el registro de hallazgos y los datos revisados.")
+                    report_buffer = io.BytesIO()
+                    with pd.ExcelWriter(report_buffer, engine='openpyxl') as writer:
+                        # 1. AUDIT LOG
+                        if 'logs_df' in locals():
+                            logs_df.to_excel(writer, sheet_name='AUDIT_LOG', index=False)
                         else:
-                            # La columna no existe en los datos target, la llenamos de nulos según el tipo original
-                            if pd.api.types.is_numeric_dtype(df_ref[col]):
-                                df_export[col] = pd.Series([float('nan')] * len(df_target), dtype="float64")
-                            else:
-                                df_export[col] = pd.Series([""] * len(df_target), dtype="object")
-                                
-                    export_sav_path = "temp_planchado.sav"
-                    pyreadstat.write_sav(
-                        df_export, 
-                        export_sav_path, 
-                        column_labels=meta_ref.column_names_to_labels,
-                        variable_value_labels=meta_ref.variable_value_labels
-                    )
-                    
-                    with open(export_sav_path, "rb") as f:
-                        sav_bytes = f.read()
+                            pd.DataFrame([{"Mensaje": "Sin hallazgos"}]).to_excel(writer, sheet_name='AUDIT_LOG', index=False)
                         
+                        # 2. DATA (Original target without deleted cols)
+                        df_target_export.to_excel(writer, sheet_name='DATA', index=False)
+                        
+                        # 3. METADATA (Pattern info)
+                        meta_info = []
+                        for c in df_ref.columns:
+                            meta_info.append({
+                                "Variable": c,
+                                "Etiqueta": meta_ref.column_names_to_labels.get(c, ""),
+                                "Valores Válidos": str(meta_ref.variable_value_labels.get(c, ""))
+                            })
+                        pd.DataFrame(meta_info).to_excel(writer, sheet_name='METADATA_REF', index=False)
+    
                     st.download_button(
-                        label="📥 Descargar SAV (Datos + Estructura)",
-                        data=sav_bytes,
-                        file_name="datos_planchados.sav",
-                        mime="application/x-spss-sav",
+                        label="📄 Descargar Excel de Auditoría",
+                        data=report_buffer.getvalue(),
+                        file_name="Reporte_Auditoria_Calidad.xlsx",
+                        mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
                         width="stretch"
                     )
-                except Exception as e:
-                    st.error(f"No se pudo generar el archivo SAV para descarga: {e}")
+    
+                with col_btn_sav:
+                    # --- EXPORT TO NEW SAV ---
+                    st.markdown("#### 💾 Datos + Estructura (.sav)")
+                    st.markdown("Genera un nuevo archivo SPSS combinando datos y estructura.")
+    
+                    try:
+                        cols_for_sav = [c for c in df_ref.columns if c not in cols_to_delete]
+                        df_export = pd.DataFrame(columns=cols_for_sav)
+                        
+                        for col in cols_for_sav:
+                            if col in df_target_export.columns:
+                                # Alinear tipos de datos asegurando que respeten el df original para evitar errores en pyreadstat
+                                if pd.api.types.is_numeric_dtype(df_ref[col]):
+                                    df_export[col] = pd.to_numeric(df_target_export[col], errors='coerce')
+                                else:
+                                    # Convertir a string, limpiando posibles "nan" que vengan de datos nulos
+                                    df_export[col] = df_target_export[col].copy()
+                                    # Rellenar nulos con string vacío antes de convertir a string
+                                    df_export[col] = df_export[col].fillna("")
+                                    df_export[col] = df_export[col].astype(str)
+                            else:
+                                # La columna no existe en los datos target, la llenamos de nulos según el tipo original
+                                if pd.api.types.is_numeric_dtype(df_ref[col]):
+                                    df_export[col] = pd.Series([float('nan')] * len(df_target_export), dtype="float64")
+                                else:
+                                    df_export[col] = pd.Series([""] * len(df_target_export), dtype="object")
+                                    
+                        export_sav_path = "temp_planchado.sav"
+                        
+                        # Clean up missing column metadata to avoid sav export crash
+                        export_col_labels = {k:v for k,v in meta_ref.column_names_to_labels.items() if k in cols_for_sav}
+                        export_val_labels = {k:v for k,v in meta_ref.variable_value_labels.items() if k in cols_for_sav}
+                        
+                        pyreadstat.write_sav(
+                            df_export, 
+                            export_sav_path, 
+                            column_labels=export_col_labels,
+                            variable_value_labels=export_val_labels
+                        )
+                        
+                        with open(export_sav_path, "rb") as f:
+                            sav_bytes = f.read()
+                            
+                        st.download_button(
+                            label="📥 Descargar SAV Patcheado",
+                            data=sav_bytes,
+                            file_name="datos_planchados.sav",
+                            mime="application/x-spss-sav",
+                            width="stretch"
+                        )
+                    except Exception as e:
+                        st.error(f"No se pudo generar el archivo SAV: {e}")
 
 
 # --- TOOL DATA STORYTELLING ---
