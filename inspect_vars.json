@@ -1,0 +1,25 @@
+{
+    "q14": {
+        "Q14_1": "[Instagram] ¿Qué redes sociales usás habitualmente?",
+        "Q14_2": "[ TikTok] ¿Qué redes sociales usás habitualmente?",
+        "Q14_3": "[X (Twitter)] ¿Qué redes sociales usás habitualmente?",
+        "Q14_4": "[YouTube] ¿Qué redes sociales usás habitualmente?",
+        "Q14_5": "[Facebook] ¿Qué redes sociales usás habitualmente?",
+        "Q14_6": "[Twitch] ¿Qué redes sociales usás habitualmente?",
+        "Q14_7": "[ WhatsApp] ¿Qué redes sociales usás habitualmente?",
+        "Q14_98": "[Otra (REGISTRAR RESPUESTA) (ANCLAR ANTEÚLTIMA)] ¿Qué redes sociales usás habitualmente?",
+        "Q14_99": "[No uso redes (ANCLAR ÚLTIMA)] ¿Qué redes sociales usás habitualmente?"
+    },
+    "q30": {
+        "q30_1": "[Instagram] ¿Cuáles de estas redes usás para expresar tu descontento? ",
+        "q30_2": "[TikTok] ¿Cuáles de estas redes usás para expresar tu descontento? ",
+        "q30_3": "[X (Twitter)] ¿Cuáles de estas redes usás para expresar tu descontento? ",
+        "q30_4": "[YouTube] ¿Cuáles de estas redes usás para expresar tu descontento? ",
+        "q30_5": "[Facebook] ¿Cuáles de estas redes usás para expresar tu descontento? ",
+        "q30_6": "[Twitch] ¿Cuáles de estas redes usás para expresar tu descontento? ",
+        "q30_7": "[WhatsApp] ¿Cuáles de estas redes usás para expresar tu descontento? ",
+        "q30_98": "[Otra (ABIERTA – REGISTRAR RESPUESTA) (ANCLAR ANTEÚLTIMA)] ¿Cuáles de estas redes usás para expresar tu descontento? ",
+        "q30_99": "[(No sabe/No responde) (ANCLAR ÚLTIMA)] ¿Cuáles de estas redes usás para expresar tu descontento? ",
+        "q30o": "especifique otro"
+    }
+}

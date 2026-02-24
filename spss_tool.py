@@ -1409,11 +1409,371 @@ def tool_visualizer():
         st.info("👈 Configura las variables en el menú lateral o genera el reporte PDF directo.")
 
 
+# --- TOOL COHERENCE AUDIT ---
+
+def tool_coherence_audit():
+    st.title("🔗 Auditoría de Coherencia Lógica")
+    st.markdown("""
+    **Módulo de Coherencia**: Verifica que las respuestas entre dos preguntas matriz sean lógicamente consistentes.
+    Ejemplo: Si un usuario indica que usa una red para quejarse (Pregunta Dependiente), debe haber indicado que usa esa red (Pregunta Base).
+    Esta auditoría asume que si la pregunta dependiente no fue contestada (o es negativa), es correcto, pero si es afirmativa, la base debe serlo también.
+    """)
+
+    df = None
+    column_labels = {}
+    value_labels = {}
+    
+    # 1. Intentar cargar desde "Gestor y Exportador Clásico"
+    if 'df' in st.session_state and st.session_state.df is not None:
+        df = st.session_state.df.copy()
+        meta = st.session_state.meta
+        column_labels = meta.column_names_to_labels if meta else {}
+        value_labels = meta.variable_value_labels if meta else {}
+    # 2. Intentar cargar desde "Editor Avanzado"
+    elif 'data_df' in st.session_state and not st.session_state['data_df'].empty:
+        df = st.session_state['data_df'].copy()
+        column_labels = st.session_state.get('column_labels', {})
+        value_labels = st.session_state.get('value_labels', {})
+        
+    if df is None or df.empty:
+        st.warning("⚠️ Primero carga un archivo en el 'Gestor y Exportador' o 'Editor Avanzado'.")
+        return
+
+    st.subheader("1. Configuración de Variables")
+    col1, col2 = st.columns(2)
+    with col1:
+         base_prefix = st.text_input("Prefijo Pregunta Base (ej. Q14)", value="Q14")
+    with col2:
+         dep_prefix = st.text_input("Prefijo Pregunta Dependiente (ej. q30)", value="q30")
+
+    if not base_prefix or not dep_prefix:
+         st.info("Ingresa los prefijos para continuar.")
+         return
+
+    cols = df.columns.tolist()
+    
+    # Buscar con prefijo_ para evitar solapamientos ej Q1 vs Q10
+    base_vars = [c for c in cols if c.lower().startswith(base_prefix.lower() + "_")]
+    dep_vars = [c for c in cols if c.lower().startswith(dep_prefix.lower() + "_")]
+
+    # Fallback sin guión bajo si no hay coincidencias
+    if not base_vars:
+        base_vars = [c for c in cols if c.lower().startswith(base_prefix.lower()) and c.lower() != base_prefix.lower()]
+    if not dep_vars:
+        dep_vars = [c for c in cols if c.lower().startswith(dep_prefix.lower()) and c.lower() != dep_prefix.lower()]
+
+    if not base_vars or not dep_vars:
+         st.warning("No se encontraron variables con esos prefijos (como matriz).")
+         return
+
+    st.write(f"Encontradas {len(base_vars)} variables Base y {len(dep_vars)} Dependientes.")
+
+    matches = []
+    
+    # Intento de matcheo automático por sufijo
+    # Intento de matcheo automático por sufijo
+    for b in base_vars:
+        suffix_b = b[len(base_prefix):].lstrip('_')
+        matched = False
+        lbl_b = column_labels.get(b, b)
+        # Formatear el label de la base: [VAR] Label
+        b_formatted = f"[{b}] {lbl_b[:60] + '...' if len(lbl_b) > 60 else lbl_b}"
+        
+        for d in dep_vars:
+            suffix_d = d[len(dep_prefix):].lstrip('_')
+            if suffix_b.lower() == suffix_d.lower():
+                 d_formatted = f"[{d}] {column_labels.get(d, d)[:60] + '...' if len(column_labels.get(d, d)) > 60 else column_labels.get(d, d)}"
+                 matches.append({"Base": b_formatted, "Dependiente": d_formatted, "Validar Par": True, "_raw_b": b, "_raw_d": d})
+                 matched = True
+                 break
+        if not matched:
+             matches.append({"Base": b_formatted, "Dependiente": None, "Validar Par": False, "_raw_b": b, "_raw_d": ""})
+             
+    # Crear listado formateado para el selectbox de dependientes
+    dep_options_formatted = [None]
+    raw_to_formatted_dep = {}
+    formatted_to_raw_dep = {}
+    
+    for d in dep_vars:
+        lbl = column_labels.get(d, d)
+        fmt = f"[{d}] {lbl[:60] + '...' if len(lbl) > 60 else lbl}"
+        dep_options_formatted.append(fmt)
+        raw_to_formatted_dep[d] = fmt
+        formatted_to_raw_dep[fmt] = d
+    # Interfaz para confirmación / edición manual
+    st.markdown("#### Revisión de Emparejamiento")
+    st.info("A continuación se muestra el intento de emparejamiento automático. Puedes editar la columna 'Dependiente' haciendo clic en las celdas para corregir los emparejamientos si los prefijos no coinciden (ej. Q14_1 con a_23). Asegúrate de marcar 'Activo' en las filas que deseas validar.")
+    
+    # Si hay desparejadas, sugerirlas en un multiselect solo visual
+    matched_deps_raw = [m["_raw_d"] for m in matches if m["_raw_d"] != ""]
+    unmatched_deps = [d for d in dep_vars if d not in matched_deps_raw]
+    
+    if unmatched_deps:
+        unmatched_fmt = [raw_to_formatted_dep[d] for d in unmatched_deps]
+        st.caption(f"Variables dependientes detectadas pero **no emparejadas automáticamente**: {', '.join(unmatched_deps)}")
+    
+    match_df = pd.DataFrame(matches)[["Base", "Dependiente", "Validar Par"]]
+    
+    # Manejo de estado para auto-check
+    # Usamos session_state para comparar qué fila cambió de 'Dependiente' y activar su checkbox
+    if 'prev_match_df' not in st.session_state or st.session_state.get('coherence_audit_signature') != f"{base_prefix}-{dep_prefix}":
+        st.session_state['prev_match_df'] = match_df.copy()
+        st.session_state['coherence_audit_signature'] = f"{base_prefix}-{dep_prefix}"
+    
+    # Usar editor de datos para permitir al usuario cambiar el matcheo
+    edited_match_df = st.data_editor(
+        st.session_state['prev_match_df'],
+        column_config={
+            "Base": st.column_config.TextColumn("Pregunta Base", disabled=True),
+            "Dependiente": st.column_config.SelectboxColumn(
+                "Pregunta Dependiente",
+                help="Selecciona la variable dependiente (se muestran con sus etiquetas)",
+                options=dep_options_formatted,
+                required=False
+            ),
+            "Validar Par": st.column_config.CheckboxColumn("Validar Par", default=False)
+        },
+        hide_index=True,
+        use_container_width=True,
+        key="coherence_matcher_editor"
+    )
+    
+    # Lógica de UX: Si el usuario seleccionó un dropdown que antes estaba vacío (o lo cambió)
+    # y no tocó expresamente el checkbox, lo auto-activamos.
+    # Streamlit re-ejecuta el script cuando el data_editor cambia.
+    changes_made = False
+    for i in range(len(edited_match_df)):
+        viejo_dep = st.session_state['prev_match_df'].iloc[i]["Dependiente"]
+        nuevo_dep = edited_match_df.iloc[i]["Dependiente"]
+        
+        # Si la columna dependiente fue cambiada por el usuario
+        if viejo_dep != nuevo_dep:
+             # Si seleccionó algo (no lo dejó vacío), auto activamos el checkbox
+             if pd.notna(nuevo_dep) and nuevo_dep is not None:
+                  edited_match_df.at[i, "Validar Par"] = True
+             # Si lo dejó vacío, desmarcamos
+             else:
+                  edited_match_df.at[i, "Validar Par"] = False
+             changes_made = True
+             
+    if changes_made:
+         st.session_state['prev_match_df'] = edited_match_df.copy()
+         st.rerun()
+         
+    # Actualizar estado para la próxima corrida (en caso de que el change haya sido manual checkbox)
+    st.session_state['prev_match_df'] = edited_match_df.copy()
+    
+    # Filtrar solo los activos y donde Dependiente no esté vacio
+    final_matches = []
+    for idx, row in edited_match_df.iterrows():
+         if row["Validar Par"] and pd.notna(row["Dependiente"]):
+              # Recuperar raw base a partir del texto formateado 
+              b_raw = matches[idx]["_raw_b"]
+              # Recuperar raw dep desde el texto formateado
+              d_raw = formatted_to_raw_dep[row["Dependiente"]]
+              final_matches.append({"Base": b_raw, "Dependiente": d_raw})
+
+    if not final_matches:
+        st.warning("No hay pares válidos activos para analizar.")
+        return
+
+    st.subheader("2. Regla de Relevancia (Filtro previo - Opcional)")
+    st.info("💡 Si la pregunta dependiente solo debía contestarse bajo cierta condición (ej. Q29 == 1), configúralo aquí. Las incoherencias solo se contarán si el encuestado cumplió esta regla.")
+    col_rel1, col_rel2 = st.columns(2)
+    with col_rel1:
+         # Selector de variables con un "Ninguna" al inicio por si no hay ruteo
+         all_options = ["-- Ninguna --"] + [f"[{c}] {column_labels.get(c, c)[:60]}..." for c in df.columns]
+         rel_var_fmt = st.selectbox("Variable Condicionante (ej. Q29)", all_options)
+    with col_rel2:
+         # Permitimos multiples valores separados por coma, como 1, 3
+         rel_valores_str = st.text_input("Valor(es) Requerido(s) (ej. 1 o 1,3)", value="", help="Separa con comas si hay varios valores válidos")
+
+    st.subheader("3. Ejecutar Auditoría")
+    col3, col4 = st.columns(2)
+    with col3:
+        target_dep_val = st.text_input("Valor esperado (Sí) en Dependiente (ej. 1 o 1.0)", value="1.0")
+    with col4:
+        target_base_val = st.text_input("Valor esperado (Sí) en Base (ej. 1 o 1.0)", value="1.0")
+
+    if st.button("🚀 Ejecutar Validación de Coherencia", type="primary"):
+        try:
+             v_dep = float(target_dep_val)
+        except:
+             v_dep = target_dep_val
+        try:
+             v_base = float(target_base_val)
+        except:
+             v_base = target_base_val
+
+        # Parsear valores de relevancia esperados a lista de strings (para comparacion flexible)
+        rel_vals_expected = []
+        if rel_valores_str and rel_valores_str.strip() != "":
+             rel_vals_expected = [v.strip() for v in rel_valores_str.split(",")]
+             
+        # Extraer nombre real de variable de relevancia
+        rel_var = None
+        if rel_var_fmt != "-- Ninguna --":
+             rel_var = rel_var_fmt.split(']')[0].replace('[', '')
+
+        incoherences = []
+        for idx, row in df.iterrows():
+            # 1. Chequeo de Regla de Relevancia (Si existe)
+            if rel_var and rel_vals_expected:
+                 v_rel = row[rel_var]
+                 # Si el valor actual está vacío, no se cumple la regla
+                 if pd.isna(v_rel) or str(v_rel).strip() == "":
+                      continue 
+                 
+                 v_rel_str = str(v_rel).strip()
+                 # Truncar .0 si se parseó como float pero el usuario puso 1
+                 if isinstance(v_rel, float) and v_rel.is_integer():
+                     v_rel_str = str(int(v_rel))
+                 
+                 # Si el valor del encuestado NO ESTÁ en la lista de valores esperados (ej. no es '1' ni '3'),
+                 # Significa que NO debe ser evaluado por incoherencias. Salteamos este encuestado.
+                 match_relevance = False
+                 for expected in rel_vals_expected:
+                      if expected == v_rel_str or expected == str(v_rel).strip():
+                           match_relevance = True
+                           break
+                           
+                 if not match_relevance:
+                      continue
+
+            # 2. Evaluación de Coherencia
+            for m in final_matches:
+                b_col = m["Base"]
+                d_col = m["Dependiente"]
+                
+                v_d = row[d_col]
+                is_dep_yes = False
+                
+                if pd.notna(v_d) and str(v_d).strip() != "":
+                     if isinstance(v_d, str) and str(v_d).strip() == str(target_dep_val).strip():
+                          is_dep_yes = True
+                     elif not isinstance(v_d, str) and v_d == v_dep:
+                          is_dep_yes = True
+
+                if is_dep_yes: # Si la dependiente es "Sí"
+                     v_b = row[b_col]
+                     is_base_yes = False
+                     
+                     if pd.notna(v_b) and str(v_b).strip() != "":
+                          if isinstance(v_b, str) and str(v_b).strip() == str(target_base_val).strip():
+                               is_base_yes = True
+                          elif not isinstance(v_b, str) and v_b == v_base:
+                               is_base_yes = True
+                               
+                     if not is_base_yes: # Si base no es "Sí", INCOHERENCIA
+                          lbl_base = column_labels.get(b_col, b_col)
+                          lbl_dep = column_labels.get(d_col, d_col)
+                          incoherences.append({
+                               "Fila_Index": idx,
+                               "Variable_Base": f"[{b_col}]",
+                               "Valor_Base_Encontrado": str(v_b),
+                               "Variable_Dependiente": f"[{d_col}]",
+                               "Valor_Dependiente": str(v_d),
+                               "Par_Validado": f"{b_col} -> {d_col}"
+                          })
+
+        st.session_state['coherence_results'] = incoherences
+        st.session_state['coherence_matches'] = final_matches
+        st.success(f"Análisis completado. Se analizaron {len(final_matches)} pares en {len(df)} registros.")
+
+    if 'coherence_results' in st.session_state:
+        incohs = st.session_state['coherence_results']
+        if not incohs:
+             st.balloons()
+             st.success("✨ ¡Excelente! No se encontraron incoherencias lógicas.")
+        else:
+             inc_df = pd.DataFrame(incohs)
+             st.error(f"⚠️ Se encontraron {len(inc_df)} casos de incoherencia.")
+             
+             st.dataframe(inc_df, use_container_width=True)
+
+             st.subheader("📥 Exportar Resultados")
+             
+             report_buffer = io.BytesIO()
+             with pd.ExcelWriter(report_buffer, engine='openpyxl') as writer:
+                  inc_df.to_excel(writer, sheet_name='Incoherencias', index=False)
+             
+             st.download_button(
+                  label="📄 Descargar Reporte (Excel)",
+                  data=report_buffer.getvalue(),
+                  file_name="Reporte_Coherencia.xlsx",
+                  mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+                  width="stretch"
+             )
+
+             st.markdown("#### 💾 Exportar SAV Corregido")
+             st.markdown("Si descargas el SAV corregido, los valores incoherentes en las preguntas **Dependientes** serán reemplazados por el código que indiques abajo.")
+             
+             # Input para definir con qué código reemplazar (ej. 99)
+             replacement_code_str = st.text_input("Código de reemplazo (deja en blanco para convertir a Nulo/Vacío)", value="99", help="Ejemplo: 99. Se aplicará a las variables dependientes incoherentes.")
+             
+             if st.button("Generar SAV Limpio"):
+                  df_clean = df.copy()
+                  # Diccionario inverso: Dado el nombre de la dependiente, sabemos que la procesamos
+                  # Si hay múltiples bases apuntando a la misma dependiente, basta con blanquearla una vez.
+                  dependent_cols_to_clean = set([m["Dependiente"] for m in st.session_state['coherence_matches']])
+                  
+                  # Parsear el codigo de reemplazo
+                  is_null_replacement = False
+                  rep_val_num = None
+                  if not replacement_code_str or replacement_code_str.strip() == "":
+                      is_null_replacement = True
+                  else:
+                      try:
+                           rep_val_num = float(replacement_code_str)
+                      except ValueError:
+                           pass # Se mantiene como string si no es numero
+                  
+                  for inc in incohs:
+                       row_idx = inc["Fila_Index"]
+                       # Extraer nombre exacto de columna dependiente
+                       d_col = inc["Variable_Dependiente"].strip("[]") 
+                       
+                       if d_col in dependent_cols_to_clean:
+                           is_numeric_col = pd.api.types.is_numeric_dtype(df_clean[d_col])
+                           
+                           if is_null_replacement:
+                               if is_numeric_col:
+                                   df_clean.at[row_idx, d_col] = float('nan')
+                               else:
+                                   df_clean.at[row_idx, d_col] = ""
+                           else:
+                               if is_numeric_col:
+                                   df_clean.at[row_idx, d_col] = rep_val_num if rep_val_num is not None else float('nan')
+                               else:
+                                   df_clean.at[row_idx, d_col] = str(replacement_code_str)
+
+                  export_sav_path = "temp_coherencia.sav"
+                  try:
+                       pyreadstat.write_sav(
+                            df_clean, 
+                            export_sav_path, 
+                            column_labels=column_labels,
+                            variable_value_labels=value_labels
+                       )
+                       
+                       with open(export_sav_path, "rb") as f:
+                            sav_bytes = f.read()
+                            
+                       st.download_button(
+                            label="📥 Descargar SAV Limpio",
+                            data=sav_bytes,
+                            file_name="datos_coherentes.sav",
+                            mime="application/x-spss-sav",
+                            width="stretch"
+                       )
+                  except Exception as e:
+                       st.error(f"Error al generar SAV: {e}")
+
 def main():
     st.sidebar.title("Navegación")
     tool_select = st.sidebar.radio(
         "Selecciona la Herramienta:",
-        ["Gestor y Exportador (Clásico)", "Editor Avanzado (Nuevo)", "Auditoría de Calidad (Beta)", "Data Storytelling (Beta)"]
+        ["Gestor y Exportador (Clásico)", "Editor Avanzado (Nuevo)", "Auditoría de Calidad (Beta)", "Auditoría de Coherencia Lógica", "Data Storytelling (Beta)"]
     )
     
     if tool_select == "Gestor y Exportador (Clásico)":
@@ -1422,6 +1782,8 @@ def main():
         tool_advanced_editor()
     elif tool_select == "Auditoría de Calidad (Beta)":
         tool_audit_validator()
+    elif tool_select == "Auditoría de Coherencia Lógica":
+        tool_coherence_audit()
     elif tool_select == "Data Storytelling (Beta)":
         tool_visualizer()
 
